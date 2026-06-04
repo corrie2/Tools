@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +23,9 @@ def resolve_git_root(workspace: Path) -> Path:
             capture_output=True,
             check=False,
             text=True,
+            timeout=5,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
         return workspace.resolve()
 
     root = result.stdout.strip() if result.returncode == 0 else ""
@@ -39,8 +41,9 @@ def resolve_git_remote(root_path: Path) -> str | None:
             capture_output=True,
             check=False,
             text=True,
+            timeout=5,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
         return None
 
     remote = result.stdout.strip() if result.returncode == 0 else ""
@@ -48,12 +51,30 @@ def resolve_git_remote(root_path: Path) -> str | None:
 
 
 def resolve_memory_scope(workspace: Path) -> MemoryScope:
-    root_path = resolve_git_root(workspace)
+    root_path = resolve_scope_root(workspace)
+    include_git_remote = os.environ.get("PPT_AGENT_MEMORY_INCLUDE_GIT_REMOTE") == "1"
     return MemoryScope(
         name=root_path.name,
         root_path=root_path,
-        git_remote=resolve_git_remote(root_path),
+        git_remote=resolve_git_remote(root_path) if include_git_remote else None,
     )
 
 
 resolve_project_scope = resolve_memory_scope
+
+
+def resolve_scope_root(workspace: Path) -> Path:
+    workspace_root = workspace.resolve()
+    explicit_root = os.environ.get("PPT_AGENT_MEMORY_PROJECT_ROOT")
+    if explicit_root:
+        resolved_explicit_root = Path(explicit_root).expanduser().resolve()
+        if workspace_root == Path.cwd().resolve():
+            return resolved_explicit_root
+        return workspace_root
+
+    mode = os.environ.get("PPT_AGENT_MEMORY_SCOPE_MODE", "workspace").strip().lower()
+    if mode == "git":
+        return resolve_git_root(workspace)
+    if mode != "workspace":
+        raise ValueError("PPT_AGENT_MEMORY_SCOPE_MODE must be 'workspace' or 'git'")
+    return workspace_root

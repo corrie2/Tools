@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Long Memory"
+  short_description: "Load and write project-scoped long-term memory for agents."
+  default_prompt: "Use project-scoped long-term memory for this workspace."

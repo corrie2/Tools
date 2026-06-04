@@ -1,12 +1,19 @@
 [project]
 name = "agent-long-memory"
-version = "0.1.0"
-description = "Workspace-scoped PostgreSQL/pgvector agent long memory."
+version = "0.2.0"
+description = "Workspace-scoped PostgreSQL/pgvector agent long memory with connection pooling, batch operations, and local agent integration."
 requires-python = ">=3.12"
 dependencies = [
     "psycopg[binary]>=3.2.0",
+    "psycopg_pool>=3.2.0",
     "sentence-transformers>=3.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "mcp>=1.0.0",
 ]
+
+[project.scripts]
+agent-long-memory-mcp = "agent_long_memory.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
