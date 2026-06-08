@@ -107,9 +107,9 @@ export default class PaperForgePlugin extends Plugin {
         const text = data.toString();
         modal.appendLog(text);
 
-        const match = text.match(/Created:\s*(.*index\.md)/);
+        const match = text.match(/Output:\s*(.*)/);
         if (match) {
-          indexMd = match[1].trim();
+          indexMd = match[1].trim() + '/index.md';
         }
       });
 
