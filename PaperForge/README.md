@@ -65,22 +65,45 @@ PaperForge uses the **OpenAI-compatible API format**, which means it works with 
 
 Set your API key as an environment variable. **Never put API keys in config.yaml** — it may be synced to Git.
 
+**Linux / macOS:**
+
 ```bash
-# Linux / macOS
 export YOUR_PROVIDER_API_KEY="sk-xxxxxxxx"
+```
 
-# Windows (PowerShell)
+**Windows (PowerShell):**
+
+```powershell
 $env:YOUR_PROVIDER_API_KEY = "sk-xxxxxxxx"
+```
 
-# Windows (CMD)
+**Windows (CMD):**
+
+```cmd
 set YOUR_PROVIDER_API_KEY=sk-xxxxxxxx
 ```
 
-If your provider uses a custom base URL (not the default), also set:
+If your provider uses a custom base URL, also set:
+
+**Linux / macOS:**
 
 ```bash
 export YOUR_PROVIDER_BASE_URL="https://your-provider.com/v1"
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+$env:YOUR_PROVIDER_BASE_URL = "https://your-provider.com/v1"
+```
+
+**Windows (CMD):**
+
+```cmd
+set YOUR_PROVIDER_BASE_URL=https://your-provider.com/v1
+```
+
+> Note: Environment variables only persist for the current terminal session. To make them permanent, add them to your shell profile (`~/.bashrc`) or System Environment Variables.
 
 #### Step 2: Update config.yaml
 
@@ -243,6 +266,50 @@ paperforge doctor --vault ~/MyVault
 
 This will check: config file, API key, model availability, and dependencies.
 
+#### Quick Setup (Recommended)
+
+PaperForge can auto-detect API keys in your environment and guide you through configuration:
+
+```bash
+paperforge config --vault ~/MyVault
+```
+
+This will:
+
+1. **Scan** environment variables for known API keys (DeepSeek, OpenAI, Moonshot, Zhipu, Qwen, Mimo, Ollama, OpenRouter, etc.)
+2. **List** detected providers with model names and masked keys
+3. **Let you choose** which provider to use
+4. **Ask how to save**:
+   - `[1]` Only use this time (don't modify config)
+   - `[2]` Set as default (save to config.yaml)
+
+Example output:
+
+```
+Scanning environment for API keys...
+
+  Detected providers:
+    [1] mimo            model=mimo-v2-pro                     key=sk-abc123...xyz9
+    [2] deepseek        model=deepseek-v3                     key=sk-def456...uvw8
+
+  Select provider number: 1
+
+  Selected: mimo (mimo-v2-pro)
+
+  [1] Only use this time (don't save)
+  [2] Set as default (save to config.yaml)
+
+  Your choice: 2
+
+  Saved to ~/MyVault/paperforge/config.yaml
+  Provider: mimo
+  Model:    mimo-v2-pro
+  Key env:  MIMO_API_KEY
+  URL env:  MIMO_BASE_URL
+```
+
+If you haven't set any API key yet, follow the "Step 1: Set Environment Variables" section above first, then run `paperforge config`.
+
 ## CLI Commands
 
 ### Core Commands
@@ -250,6 +317,7 @@ This will check: config file, API key, model availability, and dependencies.
 | Command | Description |
 |---------|-------------|
 | `paperforge ingest <pdf> --vault <path>` | Ingest a PDF into the knowledge base |
+| `paperforge config --vault <path>` | Auto-detect API keys and configure LLM |
 | `paperforge list --vault <path>` | List all ingested papers |
 | `paperforge info <slug> --vault <path>` | Show detailed information for a paper |
 | `paperforge status <slug> --vault <path>` | Show task statuses for a paper |
