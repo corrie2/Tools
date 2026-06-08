@@ -55,7 +55,150 @@ paperforge info paper-slug --vault ~/my-vault
 
 PaperForge looks for a config file at `<vault>/paperforge/config.yaml`. If not found, defaults are used.
 
-### config.yaml
+### LLM Configuration
+
+PaperForge uses the **OpenAI-compatible API format**, which means it works with any provider that supports this standard. You just need to set the right environment variables and update `config.yaml`.
+
+#### Step 1: Set Environment Variables
+
+Set your API key as an environment variable. **Never put API keys in config.yaml** — it may be synced to Git.
+
+```bash
+# Linux / macOS
+export YOUR_PROVIDER_API_KEY="sk-xxxxxxxx"
+
+# Windows (PowerShell)
+$env:YOUR_PROVIDER_API_KEY = "sk-xxxxxxxx"
+
+# Windows (CMD)
+set YOUR_PROVIDER_API_KEY=sk-xxxxxxxx
+```
+
+If your provider uses a custom base URL (not the default), also set:
+
+```bash
+export YOUR_PROVIDER_BASE_URL="https://your-provider.com/v1"
+```
+
+#### Step 2: Update config.yaml
+
+Edit `<vault>/paperforge/config.yaml` and set the `llm` section:
+
+```yaml
+llm:
+  provider: your-provider       # Provider name (for display)
+  model: model-name             # Model to use
+  api_key_env: YOUR_PROVIDER_API_KEY      # Env var name for API key
+  base_url_env: YOUR_PROVIDER_BASE_URL    # Env var name for base URL (optional)
+  timeout_seconds: 120
+  max_retries: 3
+```
+
+#### Provider Examples
+
+**DeepSeek**
+
+```bash
+export DEEPSEEK_API_KEY="sk-xxxxxxxx"
+```
+
+```yaml
+llm:
+  provider: deepseek
+  model: deepseek-v3
+  api_key_env: DEEPSEEK_API_KEY
+  base_url_env: DEEPSEEK_BASE_URL
+```
+
+**OpenAI**
+
+```bash
+export OPENAI_API_KEY="sk-xxxxxxxx"
+```
+
+```yaml
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key_env: OPENAI_API_KEY
+  base_url_env: OPENAI_BASE_URL
+```
+
+**Moonshot (月之暗面)**
+
+```bash
+export MOONSHOT_API_KEY="sk-xxxxxxxx"
+```
+
+```yaml
+llm:
+  provider: moonshot
+  model: moonshot-v1-128k
+  api_key_env: MOONSHOT_API_KEY
+  base_url_env: MOONSHOT_BASE_URL  # https://api.moonshot.cn/v1
+```
+
+**Zhipu (智谱)**
+
+```bash
+export ZHIPU_API_KEY="xxxxxxxx"
+```
+
+```yaml
+llm:
+  provider: zhipu
+  model: glm-4
+  api_key_env: ZHIPU_API_KEY
+  base_url_env: ZHIPU_BASE_URL  # https://open.bigmodel.cn/api/paas/v4
+```
+
+**Qwen (通义千问)**
+
+```bash
+export DASHSCOPE_API_KEY="sk-xxxxxxxx"
+```
+
+```yaml
+llm:
+  provider: qwen
+  model: qwen-plus
+  api_key_env: DASHSCOPE_API_KEY
+  base_url_env: DASHSCOPE_BASE_URL  # https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+**Ollama (Local)**
+
+No API key needed. Just set the base URL:
+
+```bash
+export OLLAMA_BASE_URL="http://localhost:11434/v1"
+```
+
+```yaml
+llm:
+  provider: ollama
+  model: qwen2.5:14b
+  api_key_env: OLLAMA_API_KEY  # Not needed, but field is required
+  base_url_env: OLLAMA_BASE_URL
+```
+
+Set a dummy key if required: `export OLLAMA_API_KEY="ollama"`
+
+**OpenRouter**
+
+```bash
+export OPENROUTER_API_KEY="sk-xxxxxxxx"
+```
+
+```yaml
+llm:
+  provider: openrouter
+  model: anthropic/claude-sonnet-4
+  api_key_env: OPENROUTER_API_KEY
+  base_url_env: OPENROUTER_BASE_URL  # https://openrouter.ai/api/v1
+```
+
+#### Full config.yaml Reference
 
 ```yaml
 vault:
@@ -63,16 +206,16 @@ vault:
   data_dir: paperforge      # Where db and config live
 
 llm:
-  provider: deepseek
-  model: deepseek-v4-pro
-  api_key_env: DEEPSEEK_API_KEY
-  base_url_env: DEEPSEEK_BASE_URL
-  timeout_seconds: 120
-  max_retries: 3
+  provider: deepseek        # Provider name
+  model: deepseek-v3        # Model name
+  api_key_env: DEEPSEEK_API_KEY    # Env var name for API key
+  base_url_env: DEEPSEEK_BASE_URL  # Env var name for base URL (optional)
+  timeout_seconds: 120      # Request timeout
+  max_retries: 3            # Retry count on failure
 
 parser:
-  primary: docling
-  fallback: pymupdf_pdfplumber
+  primary: docling          # Primary PDF parser
+  fallback: pymupdf_pdfplumber  # Fallback parser
   save_figures: true
   save_tables: true
 
@@ -88,12 +231,15 @@ translation:
   chunk_size: 3000
 ```
 
-### Environment Variables
+#### Verify Configuration
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DEEPSEEK_API_KEY` | Yes (for LLM) | DeepSeek API key |
-| `DEEPSEEK_BASE_URL` | No | Custom API base URL |
+Run `doctor` to check if everything is set up correctly:
+
+```bash
+paperforge doctor --vault ~/MyVault
+```
+
+This will check: config file, API key, model availability, and dependencies.
 
 ## CLI Commands
 
