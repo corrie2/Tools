@@ -69,11 +69,40 @@ def parse_with_docling(
             fig_dir = output_dir / "figures"
             fig_dir.mkdir(parents=True, exist_ok=True)
             try:
-                for i, (element, image) in enumerate(doc.iterate_picture_items()):
-                    fig_name = f"fig_{i + 1:03d}.png"
-                    fig_path = fig_dir / fig_name
-                    image.save(str(fig_path))
-                    figures[fig_name] = fig_path
+                # Try Docling's picture extraction API (version-dependent)
+                picture_items = None
+                if hasattr(doc, 'pictures'):
+                    picture_items = doc.pictures
+                elif hasattr(doc, 'iterate_picture_items'):
+                    picture_items = list(doc.iterate_picture_items())
+                elif hasattr(doc, 'body'):
+                    # Fallback: iterate body items and filter for pictures
+                    from docling.datamodel.document import PictureItem
+                    picture_items = [
+                        item for item in doc.body
+                        if isinstance(item, PictureItem)
+                    ]
+
+                if picture_items:
+                    for i, item in enumerate(picture_items):
+                        try:
+                            # Handle both (element, image) tuples and PictureItem objects
+                            if isinstance(item, tuple):
+                                element, image = item
+                            else:
+                                element = item
+                                image = getattr(item, 'image', None)
+
+                            if image is not None:
+                                fig_name = f"fig_{i + 1:03d}.png"
+                                fig_path = fig_dir / fig_name
+                                if hasattr(image, 'save'):
+                                    image.save(str(fig_path))
+                                elif hasattr(image, 'to_pil'):
+                                    image.to_pil().save(str(fig_path))
+                                figures[fig_name] = fig_path
+                        except Exception as e:
+                            logger.debug(f"Failed to extract picture {i}: {e}")
             except Exception as e:
                 logger.warning(f"Failed to extract figures: {e}")
 
