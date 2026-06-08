@@ -1,52 +1,29 @@
 """Workspace-scoped agent long memory primitives."""
 
-from agent_long_memory.access_config import (
-    add_registered_workspace,
-    allowed_workspaces,
-    describe_workspace_access,
-    list_registered_workspaces,
-    registered_workspace_for,
-    remove_registered_workspace,
-    resolve_access_workspace,
-    workspace_allowed,
-)
+import logging
+
 from agent_long_memory.memory_config import DEFAULT_EMBEDDING_MODEL, MemoryConfig, load_memory_config
-from agent_long_memory.harness import (
-    LoadedMemoryContext,
-    format_memory_context,
-    load_memory_context,
-    write_harness_memory,
-)
 from agent_long_memory.memory_db import (
     CreateMemoryRecordInput,
-    MemoryDbError,
     MemoryEmbedding,
-    MemoryNotFoundError,
     MemoryProject,
     MemoryRecord,
+    MemoryNotFoundError,
     MemorySearchResult,
     MemoryValidationError,
-    close_pool,
     connect_memory_db,
+    close_pool,
     create_memory_record,
     create_memory_records_batch,
     ensure_memory_project,
     get_memory_embedding,
     get_memory_record,
-    initialize_memory_database,
     list_memory_records,
     search_memory_records_by_embedding,
     upsert_memory_embedding,
     upsert_memory_embeddings_batch,
 )
-from agent_long_memory.memory_scope import (
-    MemoryScope,
-    ProjectScope,
-    resolve_memory_scope,
-    resolve_project_scope,
-    resolve_scope_root,
-)
-from agent_long_memory.runtime import DEFAULT_DATABASE_URL, LongMemoryRuntimeStatus, enable_long_memory_for_agent
+from agent_long_memory.memory_scope import MemoryScope, ProjectScope, resolve_memory_scope, resolve_project_scope
 from agent_long_memory.semantic_memory import (
     SemanticMemoryWriteResult,
     search_semantic_memory,
@@ -55,14 +32,16 @@ from agent_long_memory.semantic_memory import (
     write_semantic_memory_batch,
 )
 
+# 配置日志
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
 __all__ = [
     "CreateMemoryRecordInput",
-    "DEFAULT_DATABASE_URL",
     "DEFAULT_EMBEDDING_MODEL",
-    "LoadedMemoryContext",
-    "LongMemoryRuntimeStatus",
     "MemoryConfig",
-    "MemoryDbError",
     "MemoryEmbedding",
     "MemoryNotFoundError",
     "MemoryProject",
@@ -72,36 +51,22 @@ __all__ = [
     "MemoryValidationError",
     "ProjectScope",
     "SemanticMemoryWriteResult",
-    "add_registered_workspace",
-    "allowed_workspaces",
     "close_pool",
     "connect_memory_db",
     "create_memory_record",
     "create_memory_records_batch",
-    "describe_workspace_access",
-    "enable_long_memory_for_agent",
     "ensure_memory_project",
-    "format_memory_context",
     "get_memory_embedding",
     "get_memory_record",
-    "initialize_memory_database",
     "list_memory_records",
-    "list_registered_workspaces",
-    "load_memory_context",
     "load_memory_config",
     "resolve_memory_scope",
     "resolve_project_scope",
-    "resolve_access_workspace",
-    "resolve_scope_root",
-    "registered_workspace_for",
-    "remove_registered_workspace",
     "search_memory_records_by_embedding",
     "search_semantic_memory",
     "search_semantic_memory_batch",
     "upsert_memory_embedding",
     "upsert_memory_embeddings_batch",
-    "write_harness_memory",
     "write_semantic_memory",
     "write_semantic_memory_batch",
-    "workspace_allowed",
 ]

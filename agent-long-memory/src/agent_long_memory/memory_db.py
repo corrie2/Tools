@@ -39,7 +39,7 @@ class CreateMemoryRecordInput:
     memory_type: str
     title: str
     content: str
-    source_type: str = "agent"
+    source_type: str | None = None
     source_ref: str | None = None
     module_path: str | None = None
     tags: list[str] | None = None
@@ -92,20 +92,17 @@ def _get_pool(config: MemoryConfig):
             raise RuntimeError(
                 'psycopg_pool is not installed. Install it: pip install psycopg_pool'
             ) from exc
-
+        
         if not config.database_url:
             raise MemoryDbError("PPT_AGENT_MEMORY_DATABASE_URL is not set")
-
+        
         _pool = ConnectionPool(
             config.database_url,
-            kwargs={"connect_timeout": config.connect_timeout_seconds},
             min_size=config.min_pool_size,
             max_size=config.max_pool_size,
-            timeout=config.connect_timeout_seconds,
-            reconnect_timeout=config.connect_timeout_seconds,
         )
         logger.info(f"Created connection pool: min={config.min_pool_size}, max={config.max_pool_size}")
-
+    
     return _pool
 
 
@@ -184,14 +181,10 @@ class PostgresMemoryStore:
             ORDER BY e.embedding <=> %s::vector
             LIMIT %s
         """
-        config = MemoryConfig(enabled=True, database_url=self.database_url, embedding_model="")
-        conn = self._connect()
-        try:
+        with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
-        finally:
-            release_connection(conn, config)
         return [
             MemorySearchResult(record=_record_from_row(row), similarity=float(row[11]), embedding_model=row[12])
             for row in rows
@@ -211,8 +204,6 @@ def connect_memory_db(config: MemoryConfig):
         raise ValueError("PPT_AGENT_MEMORY_DATABASE_URL is required")
 
     try:
-        if not config.use_pool:
-            raise RuntimeError("connection pool disabled")
         pool = _get_pool(config)
         return pool.getconn()
     except Exception:
@@ -221,21 +212,7 @@ def connect_memory_db(config: MemoryConfig):
             import psycopg
         except ImportError as exc:
             raise RuntimeError('psycopg is not installed. Install the memory extra first: pip install -e ".[memory]"') from exc
-        return psycopg.connect(config.database_url, connect_timeout=config.connect_timeout_seconds)
-
-
-def initialize_memory_database(*, config: MemoryConfig | None = None) -> None:
-    """Initialize the PostgreSQL schema required by the memory store."""
-    from agent_long_memory.schema import SCHEMA_SQL
-
-    resolved = config or load_memory_config()
-    conn = connect_memory_db(resolved)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(SCHEMA_SQL)
-        conn.commit()
-    finally:
-        release_connection(conn, resolved)
+        return psycopg.connect(config.database_url)
 
 
 def release_connection(conn, config: MemoryConfig):
@@ -350,12 +327,12 @@ def create_memory_records_batch(
     """批量创建记忆记录"""
     if not records:
         return []
-
+    
     for record in records:
         _validate_record_input(record)
-
+    
     logger.debug(f"Batch creating {len(records)} memory records")
-
+    
     query = """
         INSERT INTO memory_records (
             project_id,
@@ -382,7 +359,7 @@ def create_memory_records_batch(
                   importance,
                   confidence
     """
-
+    
     results = []
     conn = connect_memory_db(config)
     try:
@@ -407,7 +384,7 @@ def create_memory_records_batch(
         conn.commit()
     finally:
         release_connection(conn, config)
-
+    
     logger.debug(f"Batch created {len(results)} memory records")
     return results
 
@@ -417,7 +394,7 @@ def get_memory_record(record_id: str, *, project_id: str, config: MemoryConfig) 
         raise MemoryValidationError("record_id must be non-empty")
     if not str(project_id).strip():
         raise MemoryValidationError("project_id must be non-empty")
-
+    
     logger.debug(f"Getting memory record: {record_id}")
     query = """
         SELECT id,
@@ -527,15 +504,15 @@ def upsert_memory_embeddings_batch(
     config: MemoryConfig,
 ) -> list[MemoryEmbedding]:
     """批量upsert嵌入向量
-
+    
     Args:
         embeddings: [(record_id, embedding_model, embedding), ...]
     """
     if not embeddings:
         return []
-
+    
     logger.debug(f"Batch upserting {len(embeddings)} memory embeddings")
-
+    
     query = """
         INSERT INTO memory_embeddings (record_id, embedding_model, embedding)
         VALUES (%s, %s, %s::vector)
@@ -543,7 +520,7 @@ def upsert_memory_embeddings_batch(
         SET embedding = EXCLUDED.embedding
         RETURNING id, record_id, embedding_model, embedding, created_at
     """
-
+    
     results = []
     conn = connect_memory_db(config)
     try:
@@ -558,7 +535,7 @@ def upsert_memory_embeddings_batch(
         conn.commit()
     finally:
         release_connection(conn, config)
-
+    
     logger.debug(f"Batch upserted {len(results)} memory embeddings")
     return results
 
@@ -576,7 +553,7 @@ def get_memory_embedding(
         raise MemoryValidationError("embedding_model must be non-empty")
     if not str(project_id).strip():
         raise MemoryValidationError("project_id must be non-empty")
-
+    
     logger.debug(f"Getting memory embedding: record={record_id}, model={embedding_model}")
     query = """
         SELECT e.id, e.record_id, e.embedding_model, e.embedding, e.created_at
