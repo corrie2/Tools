@@ -4,7 +4,8 @@ authors:
 {% for author in authors %}
   - "{{ author }}"
 {% endfor %}
-year: {{ year }}
+{% if year %}year: {{ year }}
+{% endif %}
 venue: "{{ venue }}"
 doi: "{{ doi }}"
 language: "{{ language }}"
@@ -28,7 +29,7 @@ tags:
 {% endif %}
 ## Basic Information
 
-- **Year:** {{ year }}
+- **Year:** {{ year or "Unknown" }}
 - **Venue:** {{ venue }}
 - **DOI:** {{ doi }}
 - **Authors:** {{ authors | join(', ') }}
