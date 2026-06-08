@@ -5,9 +5,52 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import yaml
+
+
+# Known provider patterns: (provider_name, api_key_env, base_url_env, default_model, default_base_url)
+KNOWN_PROVIDERS = [
+    ("deepseek", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "deepseek-v3", "https://api.deepseek.com/v1"),
+    ("openai", "OPENAI_API_KEY", "OPENAI_BASE_URL", "gpt-4o", "https://api.openai.com/v1"),
+    ("moonshot", "MOONSHOT_API_KEY", "MOONSHOT_BASE_URL", "moonshot-v1-128k", "https://api.moonshot.cn/v1"),
+    ("zhipu", "ZHIPU_API_KEY", "ZHIPU_BASE_URL", "glm-4", "https://open.bigmodel.cn/api/paas/v4"),
+    ("qwen", "DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL", "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    ("mimo", "MIMO_API_KEY", "MIMO_BASE_URL", "mimo-v2-pro", "https://token-plan-cn.xiaomimimo.com/v1"),
+    ("ollama", "OLLAMA_API_KEY", "OLLAMA_BASE_URL", "qwen2.5:14b", "http://localhost:11434/v1"),
+    ("openrouter", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "anthropic/claude-sonnet-4", "https://openrouter.ai/api/v1"),
+    ("siliconflow", "SILICONFLOW_API_KEY", "SILICONFLOW_BASE_URL", "Qwen/Qwen2.5-72B-Instruct", "https://api.siliconflow.cn/v1"),
+    ("together", "TOGETHER_API_KEY", "TOGETHER_BASE_URL", "meta-llama/Llama-3-70b-chat-hf", "https://api.together.xyz/v1"),
+]
+
+
+def detect_providers() -> List[Tuple[str, str, str, str, str]]:
+    """Scan environment variables and return available providers.
+
+    Returns list of (provider, api_key_env, base_url_env, default_model, default_base_url)
+    for providers whose API key is set in environment.
+    """
+    found = []
+    for entry in KNOWN_PROVIDERS:
+        provider, key_env, url_env, model, base_url = entry
+        key = os.environ.get(key_env)
+        if key and key.strip():
+            # Skip dummy/placeholder keys (like "ollama")
+            if provider == "ollama" or len(key) > 5:
+                found.append(entry)
+    return found
+
+
+def get_provider_config(provider_name: str) -> Optional[Tuple[str, str, str, str]]:
+    """Get config values for a known provider by name.
+
+    Returns (api_key_env, base_url_env, default_model, default_base_url) or None.
+    """
+    for entry in KNOWN_PROVIDERS:
+        if entry[0] == provider_name:
+            return (entry[1], entry[2], entry[3], entry[4])
+    return None
 
 
 @dataclass

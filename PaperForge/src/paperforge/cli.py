@@ -138,12 +138,26 @@ def doctor(vault: Path, fix: bool):
     except ImportError:
         checks.append(("rapidfuzz", False, "not installed (pip install rapidfuzz)"))
 
-    # 10. Env vars
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    checks.append(("ENV DEEPSEEK_API_KEY", bool(api_key), "set" if api_key else "not set"))
-
-    base_url = os.environ.get("DEEPSEEK_BASE_URL")
-    checks.append(("ENV DEEPSEEK_BASE_URL", bool(base_url), base_url if base_url else "not set (optional)"))
+    # 10. Env vars — detect all available providers
+    from paperforge.config import detect_providers, KNOWN_PROVIDERS
+    detected = detect_providers()
+    if detected:
+        for provider, key_env, url_env, model, base_url in detected:
+            checks.append((f"ENV {key_env}", True, f"({provider}) {model}"))
+    else:
+        checks.append(("ENV API Key", False, "no API key found in environment"))
+    # Also check if config has a provider set
+    config_provider = "not set"
+    if config_path.exists():
+        import yaml as _yaml
+        try:
+            with open(config_path) as _f:
+                _data = _yaml.safe_load(_f) or {}
+            _llm = _data.get("llm", {})
+            config_provider = f"{_llm.get('provider', '?')} / {_llm.get('model', '?')}"
+        except Exception:
+            pass
+    checks.append(("Config LLM provider", config_provider != "not set", config_provider))
 
     # 11. Database statistics (if db exists)
     paper_count = 0
@@ -1111,6 +1125,105 @@ def export_cmd(vault: Path, fmt: str, output: Path | None):
 
     size_mb = output.stat().st_size / (1024 * 1024)
     click.echo(click.style(f"\n  Export complete: {output} ({size_mb:.1f} MB)", fg="green"))
+
+
+@cli.command("config")
+@click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
+def config_cmd(vault: Path):
+    """Auto-detect API keys and configure LLM provider."""
+    from paperforge.config import detect_providers, get_provider_config, create_default_config
+
+    click.echo("Scanning environment for API keys...\n")
+
+    detected = detect_providers()
+
+    if not detected:
+        click.echo(click.style("  No API keys found in environment.", fg="yellow"))
+        click.echo("\n  Set an API key first, e.g.:")
+        click.echo('    export DEEPSEEK_API_KEY="sk-xxxxxxxx"    # Linux/macOS')
+        click.echo('    $env:DEEPSEEK_API_KEY = "sk-xxxxxxxx"   # Windows PowerShell')
+        click.echo('    set DEEPSEEK_API_KEY=sk-xxxxxxxx         # Windows CMD')
+        sys.exit(1)
+
+    # Show detected providers
+    click.echo(click.style("  Detected providers:", fg="green"))
+    for i, (provider, key_env, url_env, model, base_url) in enumerate(detected, 1):
+        key_val = os.environ.get(key_env, "")
+        masked = key_val[:8] + "..." + key_val[-4:] if len(key_val) > 12 else "***"
+        click.echo(f"    [{i}] {provider:<15} model={model:<30} key={masked}")
+
+    # Let user choose
+    if len(detected) == 1:
+        chosen = detected[0]
+        click.echo(f"\n  Only one provider found: {chosen[0]}")
+    else:
+        click.echo("")
+        while True:
+            try:
+                choice = click.prompt("  Select provider number", type=int)
+                if 1 <= choice <= len(detected):
+                    chosen = detected[choice - 1]
+                    break
+                click.echo(click.style(f"  Enter 1-{len(detected)}", fg="red"))
+            except (ValueError, click.Abort):
+                click.echo(click.style(f"  Enter 1-{len(detected)}", fg="red"))
+
+    provider, key_env, url_env, model, default_base_url = chosen
+    click.echo(f"\n  Selected: {provider} ({model})")
+
+    # Ask: one-time or default?
+    click.echo("\n  [1] Only use this time (don't save)")
+    click.echo("  [2] Set as default (save to config.yaml)")
+    click.echo("")
+
+    while True:
+        try:
+            save_choice = click.prompt("  Your choice", type=int)
+            if save_choice in (1, 2):
+                break
+            click.echo(click.style("  Enter 1 or 2", fg="red"))
+        except (ValueError, click.Abort):
+            click.echo(click.style("  Enter 1 or 2", fg="red"))
+
+    if save_choice == 1:
+        # One-time: just set env vars for this process (already set by user)
+        click.echo(click.style(f"\n  Using {provider} for this session only.", fg="green"))
+        click.echo(f"  Config not modified. API key from environment: {key_env}")
+    else:
+        # Save to config.yaml
+        config_dir = vault / "paperforge"
+        config_path = config_dir / "config.yaml"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load existing or create new
+        if config_path.exists():
+            with open(config_path) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {}
+
+        # Update LLM section
+        base_url_env = url_env if os.environ.get(url_env) else ""
+        data["llm"] = {
+            "provider": provider,
+            "model": model,
+            "api_key_env": key_env,
+            "base_url_env": base_url_env,
+            "timeout_seconds": data.get("llm", {}).get("timeout_seconds", 120),
+            "max_retries": data.get("llm", {}).get("max_retries", 3),
+        }
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+        click.echo(click.style(f"\n  Saved to {config_path}", fg="green"))
+        click.echo(f"  Provider: {provider}")
+        click.echo(f"  Model:    {model}")
+        click.echo(f"  Key env:  {key_env}")
+        if base_url_env:
+            click.echo(f"  URL env:  {base_url_env}")
+
+    click.echo("")
 
 
 if __name__ == "__main__":
