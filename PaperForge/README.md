@@ -1,5 +1,7 @@
 # PaperForge
 
+English | [中文](README.zh.md)
+
 PaperForge is a CLI tool that converts academic PDF papers into structured knowledge bases for Obsidian. It parses PDFs, extracts metadata, generates AI-powered summaries, Q&A, glossaries, and builds citation graphs between papers.
 
 ## Features
