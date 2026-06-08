@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -93,7 +94,7 @@ class Paper(BaseModel):
             "slug": self.slug,
             "title": self.title,
             "normalized_title": self.normalized_title,
-            "authors": str(self.authors),  # JSON-serialized in store
+            "authors": json.dumps(self.authors),  # JSON-serialized in store
             "year": self.year,
             "venue": self.venue,
             "doi": self.doi,
