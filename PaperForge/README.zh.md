@@ -342,7 +342,7 @@ set MIMO_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1
 ```yaml
 llm:
   provider: mimo
-  model: mimo-v2-pro
+  model: mimo-v2.5-pro
   api_key_env: MIMO_API_KEY
   base_url_env: MIMO_BASE_URL
 ```
@@ -471,7 +471,8 @@ paperforge config --vault ~/MyVault
 1. **自动扫描**环境变量中的 API Key（支持 DeepSeek、OpenAI、Moonshot、智谱、通义、Mimo、Ollama、OpenRouter 等）
 2. **列出检测到的服务商**，显示模型名和 Key 掩码
 3. **让你选择**使用哪个服务商
-4. **选择使用方式**：
+4. **自动从 API 拉取模型列表**，让你选择具体模型
+5. **选择使用方式**：
    - `[1]` 仅本次使用（不修改配置文件）
    - `[2]` 设为默认（写入 config.yaml，以后直接使用）
 
@@ -481,12 +482,25 @@ paperforge config --vault ~/MyVault
 Scanning environment for API keys...
 
   Detected providers:
-    [1] mimo            model=mimo-v2-pro                     key=sk-abc123...xyz9
-    [2] deepseek        model=deepseek-v3                     key=sk-def456...uvw8
+    [1] mimo            model=mimo-v2.5-pro                   key=tp-cfq9q...h3u5
+    [2] deepseek        model=deepseek-v3                     key=sk-f70d8...38f4
 
   Select provider number: 1
 
-  Selected: mimo (mimo-v2-pro)
+  Selected: mimo
+  Fetching models from https://token-plan-cn.xiaomimimo.com/v1...
+  Found 5 models:
+
+    [1] mimo-v2-pro
+    [2] mimo-v2.5-pro
+    [3] mimo-v2-flash
+
+  Default (from config): mimo-v2.5-pro
+  Press Enter to use default, or enter model number
+
+  Model selection: 2
+
+  Model: mimo-v2.5-pro
 
   [1] Only use this time (don't save)
   [2] Set as default (save to config.yaml)
@@ -495,10 +509,12 @@ Scanning environment for API keys...
 
   Saved to ~/MyVault/paperforge/config.yaml
   Provider: mimo
-  Model:    mimo-v2-pro
+  Model:    mimo-v2.5-pro
   Key env:  MIMO_API_KEY
   URL env:  MIMO_BASE_URL
 ```
+
+如果 API 无法连接（比如 Ollama 没启动），会提示手动输入模型名。
 
 如果你还没有设置任何 API Key，先按上面"第一步：设置环境变量"设置好，再运行 `paperforge config`。
 

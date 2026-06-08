@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 # Known provider patterns: (provider_name, api_key_env, base_url_env, default_model, default_base_url)
@@ -17,7 +20,7 @@ KNOWN_PROVIDERS = [
     ("moonshot", "MOONSHOT_API_KEY", "MOONSHOT_BASE_URL", "moonshot-v1-128k", "https://api.moonshot.cn/v1"),
     ("zhipu", "ZHIPU_API_KEY", "ZHIPU_BASE_URL", "glm-4", "https://open.bigmodel.cn/api/paas/v4"),
     ("qwen", "DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL", "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-    ("mimo", "MIMO_API_KEY", "MIMO_BASE_URL", "mimo-v2-pro", "https://token-plan-cn.xiaomimimo.com/v1"),
+    ("mimo", "MIMO_API_KEY", "MIMO_BASE_URL", "mimo-v2.5-pro", "https://token-plan-cn.xiaomimimo.com/v1"),
     ("ollama", "OLLAMA_API_KEY", "OLLAMA_BASE_URL", "qwen2.5:14b", "http://localhost:11434/v1"),
     ("openrouter", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "anthropic/claude-sonnet-4", "https://openrouter.ai/api/v1"),
     ("siliconflow", "SILICONFLOW_API_KEY", "SILICONFLOW_BASE_URL", "Qwen/Qwen2.5-72B-Instruct", "https://api.siliconflow.cn/v1"),
@@ -51,6 +54,31 @@ def get_provider_config(provider_name: str) -> Optional[Tuple[str, str, str, str
         if entry[0] == provider_name:
             return (entry[1], entry[2], entry[3], entry[4])
     return None
+
+
+def fetch_models(api_key: str, base_url: str, timeout: int = 15) -> List[dict]:
+    """Fetch available models from an OpenAI-compatible API.
+
+    Returns list of dicts with 'id' key, or empty list on failure.
+    """
+    import urllib.request
+    import urllib.error
+
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            models = data.get("data", [])
+            # Sort by id
+            models.sort(key=lambda m: m.get("id", ""))
+            return models
+    except Exception as e:
+        logger.debug("Failed to fetch models from %s: %s", url, e)
+        return []
 
 
 @dataclass

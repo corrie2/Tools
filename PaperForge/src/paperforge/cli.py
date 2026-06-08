@@ -1169,7 +1169,44 @@ def config_cmd(vault: Path):
                 click.echo(click.style(f"  Enter 1-{len(detected)}", fg="red"))
 
     provider, key_env, url_env, model, default_base_url = chosen
-    click.echo(f"\n  Selected: {provider} ({model})")
+    click.echo(f"\n  Selected: {provider}")
+
+    # Fetch available models from the API
+    api_key = os.environ.get(key_env, "")
+    base_url = os.environ.get(url_env, "") or default_base_url
+    click.echo(f"  Fetching models from {base_url}...")
+
+    from paperforge.config import fetch_models
+    available_models = fetch_models(api_key, base_url)
+
+    if available_models:
+        click.echo(click.style(f"  Found {len(available_models)} models:\n", fg="green"))
+        for i, m in enumerate(available_models, 1):
+            click.echo(f"    [{i}] {m['id']}")
+
+        click.echo(f"\n  Default (from config): {model}")
+        click.echo("  Press Enter to use default, or enter model number\n")
+
+        while True:
+            try:
+                model_input = click.prompt("  Model selection", default="", show_default=False)
+                if model_input == "":
+                    # Use default
+                    break
+                model_idx = int(model_input)
+                if 1 <= model_idx <= len(available_models):
+                    model = available_models[model_idx - 1]["id"]
+                    break
+                click.echo(click.style(f"  Enter 1-{len(available_models)} or Enter for default", fg="red"))
+            except (ValueError, click.Abort):
+                click.echo(click.style(f"  Enter 1-{len(available_models)} or Enter for default", fg="red"))
+    else:
+        click.echo(click.style("  Could not fetch model list (using default)", fg="yellow"))
+        custom = click.prompt(f"  Model name", default=model, show_default=True)
+        if custom:
+            model = custom
+
+    click.echo(f"\n  Model: {model}")
 
     # Ask: one-time or default?
     click.echo("\n  [1] Only use this time (don't save)")

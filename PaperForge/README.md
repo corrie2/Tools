@@ -279,7 +279,8 @@ This will:
 1. **Scan** environment variables for known API keys (DeepSeek, OpenAI, Moonshot, Zhipu, Qwen, Mimo, Ollama, OpenRouter, etc.)
 2. **List** detected providers with model names and masked keys
 3. **Let you choose** which provider to use
-4. **Ask how to save**:
+4. **Fetch available models** from the provider's API and let you pick one
+5. **Ask how to save**:
    - `[1]` Only use this time (don't modify config)
    - `[2]` Set as default (save to config.yaml)
 
@@ -289,12 +290,25 @@ Example output:
 Scanning environment for API keys...
 
   Detected providers:
-    [1] mimo            model=mimo-v2-pro                     key=sk-abc123...xyz9
-    [2] deepseek        model=deepseek-v3                     key=sk-def456...uvw8
+    [1] mimo            model=mimo-v2.5-pro                   key=tp-cfq9q...h3u5
+    [2] deepseek        model=deepseek-v3                     key=sk-f70d8...38f4
 
   Select provider number: 1
 
-  Selected: mimo (mimo-v2-pro)
+  Selected: mimo
+  Fetching models from https://token-plan-cn.xiaomimimo.com/v1...
+  Found 5 models:
+
+    [1] mimo-v2-pro
+    [2] mimo-v2.5-pro
+    [3] mimo-v2-flash
+
+  Default (from config): mimo-v2.5-pro
+  Press Enter to use default, or enter model number
+
+  Model selection: 2
+
+  Model: mimo-v2.5-pro
 
   [1] Only use this time (don't save)
   [2] Set as default (save to config.yaml)
@@ -303,10 +317,12 @@ Scanning environment for API keys...
 
   Saved to ~/MyVault/paperforge/config.yaml
   Provider: mimo
-  Model:    mimo-v2-pro
+  Model:    mimo-v2.5-pro
   Key env:  MIMO_API_KEY
   URL env:  MIMO_BASE_URL
 ```
+
+If the API is unreachable (e.g. Ollama not running), you'll be prompted to enter the model name manually.
 
 If you haven't set any API key yet, follow the "Step 1: Set Environment Variables" section above first, then run `paperforge config`.
 
