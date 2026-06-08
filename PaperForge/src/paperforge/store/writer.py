@@ -37,7 +37,7 @@ def write_paper_md(
     Returns:
         Path to the paper directory.
     """
-    papers_dir = vault / "papers" / str(year) / slug
+    papers_dir = vault / "papers" / str(year or "unknown") / slug
     papers_dir.mkdir(parents=True, exist_ok=True)
 
     # Write paper.md
@@ -114,7 +114,7 @@ def write_index_md(
         pending_refs=pending_refs or [],
     )
 
-    paper_dir = vault / "papers" / str(year) / slug
+    paper_dir = vault / "papers" / str(year or "unknown") / slug
     paper_dir.mkdir(parents=True, exist_ok=True)
     index_path = paper_dir / "index.md"
     index_path.write_text(content, encoding="utf-8")
@@ -154,7 +154,7 @@ def write_summary_md(
         relation_to_prior_work=summary_result.relation_to_prior_work,
     )
 
-    paper_dir = vault / "papers" / str(year) / slug
+    paper_dir = vault / "papers" / str(year or "unknown") / slug
     paper_dir.mkdir(parents=True, exist_ok=True)
     summary_path = paper_dir / "summary.md"
     summary_path.write_text(content, encoding="utf-8")
@@ -188,7 +188,7 @@ def write_qa_md(
         questions=[{"question": q.question, "answer": q.answer} for q in qa_result.questions],
     )
 
-    paper_dir = vault / "papers" / str(year) / slug
+    paper_dir = vault / "papers" / str(year or "unknown") / slug
     paper_dir.mkdir(parents=True, exist_ok=True)
     qa_path = paper_dir / "qa.md"
     qa_path.write_text(content, encoding="utf-8")
@@ -230,7 +230,7 @@ def write_glossary_md(
         ],
     )
 
-    paper_dir = vault / "papers" / str(year) / slug
+    paper_dir = vault / "papers" / str(year or "unknown") / slug
     paper_dir.mkdir(parents=True, exist_ok=True)
     glossary_path = paper_dir / "glossary.md"
     glossary_path.write_text(content, encoding="utf-8")
@@ -254,7 +254,7 @@ def write_translate_md(
     Returns:
         Path to translated.md.
     """
-    paper_dir = vault / "papers" / str(year) / slug
+    paper_dir = vault / "papers" / str(year or "unknown") / slug
     paper_dir.mkdir(parents=True, exist_ok=True)
     translate_path = paper_dir / "translated.md"
     translate_path.write_text(translated_text, encoding="utf-8")
@@ -275,13 +275,17 @@ def write_papers_index(vault: Path, papers: List[dict]) -> Path:
     template = env.get_template("papers_index.md.j2")
 
     # Group papers by year
-    by_year: Dict[int, List[dict]] = {}
+    by_year: Dict[str, List[dict]] = {}
     for p in papers:
-        y = p.get("year") or 0
+        y = p.get("year") or "Unknown"
         by_year.setdefault(y, []).append(p)
 
-    # Sort years descending
-    sorted_years = sorted(by_year.keys(), reverse=True)
+    # Sort years descending (Unknown goes last)
+    def year_sort_key(y):
+        if y == "Unknown":
+            return -1
+        return y
+    sorted_years = sorted(by_year.keys(), key=year_sort_key, reverse=True)
     grouped = [(y, sorted(by_year[y], key=lambda x: x.get("slug", ""))) for y in sorted_years]
 
     content = template.render(grouped_papers=grouped)

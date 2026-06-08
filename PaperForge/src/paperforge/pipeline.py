@@ -122,7 +122,7 @@ def ingest(
     doi = meta.get("doi")
     language = meta.get("language", "unknown")
     venue = ""
-    year = datetime.now().year
+    year = meta.get("year")  # None if unknown
     external_id = None
 
     # Use DOI from parsed text if not found in metadata
@@ -160,12 +160,9 @@ def ingest(
     slug = generate_slug(title) if title else generate_slug(pdf_path.stem)
     norm_title = normalize_title(title) if title else ""
 
-    # Determine year (default to current year if unknown)
-    from datetime import datetime
-    if not year or year == datetime.now().year:
-        # If S2 didn't set a year, try to extract from text
-        if not year or year == datetime.now().year:
-            year = datetime.now().year
+    # Determine year (use "unknown" if truly unknown, never default to current year)
+    if not year:
+        year = None
 
     paper = Paper(
         slug=slug,
@@ -185,8 +182,8 @@ def ingest(
     )
 
     # Set vault paths
-    paper.paper_dir = f"papers/{year}/{slug}"
-    paper.vault_path = f"papers/{year}/{slug}/index.md"
+    paper.paper_dir = f"papers/{year or 'unknown'}/{slug}"
+    paper.vault_path = f"papers/{year or 'unknown'}/{slug}/index.md"
 
     # 6. Write paper.md + figures to vault
     logger.info("Writing paper files to vault...")
