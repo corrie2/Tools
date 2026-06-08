@@ -1,0 +1,18 @@
+---
+title: "Paper Index"
+tags:
+  - paper-index
+---
+
+# Paper Index
+
+{% for year, papers in grouped_papers %}
+## {{ year }}
+
+| Paper | Authors | Venue | DOI |
+|-------|---------|-------|-----|
+{% for p in papers %}{% set auth = p.authors if p.authors is string else p.authors | join(', ') %}
+| [[{{ p.slug }}/index\|{{ p.title }}]] | {{ auth }} | {{ p.venue or '' }} | {{ p.doi or '' }} |
+{% endfor %}
+
+{% endfor %}

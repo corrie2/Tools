@@ -1,0 +1,134 @@
+/* PaperForge Obsidian Plugin Styles */
+
+/* Dashboard View */
+.paperforge-dashboard {
+  padding: 10px;
+}
+
+.paperforge-dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.paperforge-dashboard-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.paperforge-refresh-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.paperforge-refresh-btn:hover {
+  background: var(--interactive-hover);
+}
+
+/* Paper List */
+.paperforge-paper-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.paperforge-paper-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.paperforge-paper-item:hover {
+  background: var(--background-secondary-alt);
+}
+
+.paperforge-paper-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--text-normal);
+}
+
+.paperforge-paper-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.paperforge-paper-slug {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: monospace;
+}
+
+/* Status Messages */
+.paperforge-loading {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.paperforge-error {
+  color: var(--text-error);
+  padding: 20px 0;
+  text-align: center;
+}
+
+.paperforge-empty {
+  color: var(--text-muted);
+  padding: 20px 0;
+  text-align: center;
+  font-style: italic;
+}
+
+/* Progress Modal */
+.paperforge-modal {
+  max-width: 600px;
+}
+
+.paperforge-modal h3 {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.paperforge-log {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.paperforge-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.paperforge-modal-buttons button {
+  padding: 6px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.paperforge-modal-buttons button:hover {
+  background: var(--interactive-hover);
+}

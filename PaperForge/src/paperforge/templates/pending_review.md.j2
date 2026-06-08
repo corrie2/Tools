@@ -1,0 +1,30 @@
+# PaperForge — 待确认引用
+
+以下引用匹配置信度不足，需要人工确认。
+
+{% for item in pending %}
+## {{ item.source_title }}
+
+原始引用：{{ item.raw_text }}
+
+解析标题：{{ item.parsed_title }}
+{% if item.parsed_year %}年份：{{ item.parsed_year }}{% endif %}
+
+候选匹配：[[{{ item.candidate_slug }}]]
+相似度：{{ item.confidence }}
+
+确认：
+```bash
+paperforge confirm-ref {{ item.source_slug }} {{ item.candidate_slug }} --vault {{ vault }}
+```
+
+拒绝：
+```bash
+paperforge reject-ref {{ item.source_slug }} {{ item.candidate_slug }} --vault {{ vault }}
+```
+
+---
+{% endfor %}
+{% if not pending %}
+（暂无待确认引用）
+{% endif %}

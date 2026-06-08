@@ -1,0 +1,79 @@
+---
+title: "{{ title }}"
+authors:
+{% for author in authors %}
+  - "{{ author }}"
+{% endfor %}
+year: {{ year }}
+venue: "{{ venue }}"
+doi: "{{ doi }}"
+language: "{{ language }}"
+slug: "{{ slug }}"
+paper_id: "{{ paper_id }}"
+parser: "{{ parser }}"
+parse_quality: "{{ parse_quality }}"
+fallback_used: {{ "true" if fallback_used else "false" }}
+tags:
+  - paper
+{% for tag in tags %}
+  - {{ tag }}
+{% endfor %}
+---
+
+# {{ title }}
+
+{% if one_sentence_summary %}
+> {{ one_sentence_summary }}
+
+{% endif %}
+## Basic Information
+
+- **Year:** {{ year }}
+- **Venue:** {{ venue }}
+- **DOI:** {{ doi }}
+- **Authors:** {{ authors | join(', ') }}
+- **Language:** {{ language }}
+
+## Documents
+
+- [[paper]]
+{% if has_translation %}- [[translated]]{% endif %}
+- [[summary]]
+- [[qa]]
+- [[glossary]]
+
+## Structured Summary
+
+{% if one_sentence_summary %}
+> {{ one_sentence_summary }}
+{% else %}
+_(Not yet generated — run `paperforge regenerate {{ slug }} --type summary`)_
+{% endif %}
+
+## Cited Papers (in this library)
+
+{% for ref in citing_papers %}
+- [[{{ ref.slug }}]]{% if ref.method == 'title_fuzzy' %} (confidence: {{ ref.confidence }}){% endif %}
+
+{% endfor %}
+{% if not citing_papers %}
+_(No known local citations)_
+{% endif %}
+
+## Cited By
+
+{% for cited_by in cited_by_papers %}
+- [[{{ cited_by.slug }}]]
+{% endfor %}
+{% if not cited_by_papers %}
+_(None yet)_
+{% endif %}
+
+## Pending References
+
+{% for item in pending_refs %}
+- {{ item.title }}{% if item.year %} ({{ item.year }}){% endif %} — confidence: {{ item.confidence }}
+{% endfor %}
+{% if not pending_refs %}
+_(None)_
+{% endif %}

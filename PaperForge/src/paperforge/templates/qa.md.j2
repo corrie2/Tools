@@ -1,0 +1,7 @@
+# Q&A — {{ title }}
+{% for qa in questions %}
+**Q{{ loop.index }}: {{ qa.question }}**
+
+{{ qa.answer }}
+
+{% endfor %}

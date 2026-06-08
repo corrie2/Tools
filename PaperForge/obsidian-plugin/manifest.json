@@ -1,0 +1,9 @@
+{
+  "id": "paperforge",
+  "name": "PaperForge",
+  "version": "0.1.0",
+  "minAppVersion": "0.15.0",
+  "description": "Academic paper PDF to structured knowledge base. Calls PaperForge CLI to parse, summarize, and link papers.",
+  "author": "PaperForge",
+  "isDesktopOnly": true
+}

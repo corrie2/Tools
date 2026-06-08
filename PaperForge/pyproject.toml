@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paperforge"
+version = "0.1.0"
+description = "PaperForge — PDF to structured knowledge base CLI tool"
+requires-python = ">=3.10"
+dependencies = [
+    "docling",
+    "pymupdf",
+    "pdfplumber",
+    "click",
+    "jinja2",
+    "langdetect",
+    "pydantic>=2.0",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+
+[project.scripts]
+paperforge = "paperforge.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paperforge"]
