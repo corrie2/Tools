@@ -15,8 +15,8 @@ PaperForge is a CLI tool that converts academic PDF papers into structured knowl
 
 ```bash
 # Clone the repository
-git clone <repo-url> PaperForge
-cd PaperForge
+git clone https://github.com/corrie2/Tools.git
+cd Tools/PaperForge
 
 # Create virtual environment
 python -m venv .venv
