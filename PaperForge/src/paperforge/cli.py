@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import sys
@@ -151,7 +152,7 @@ def doctor(vault: Path, fix: bool):
     if config_path.exists():
         import yaml as _yaml
         try:
-            with open(str(config_path)) as _f:
+            with io.open(str(config_path)) as _f:
                 _data = _yaml.safe_load(_f) or {}
             _llm = _data.get("llm", {})
             config_provider = f"{_llm.get('provider', '?')} / {_llm.get('model', '?')}"
@@ -1234,7 +1235,7 @@ def config_cmd(vault: Path):
 
         # Load existing or create new
         if config_path.exists():
-            with open(str(config_path)) as f:
+            with io.open(str(config_path)) as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {}
@@ -1250,7 +1251,7 @@ def config_cmd(vault: Path):
             "max_retries": data.get("llm", {}).get("max_retries", 3),
         }
 
-        with open(str(config_path), "w", encoding="utf-8") as f:
+        with io.open(str(config_path), "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
 
         click.echo(click.style(f"\n  Saved to {config_path}", fg="green"))
