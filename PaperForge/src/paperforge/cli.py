@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+import yaml
 
 from paperforge.config import load_config
 from paperforge.store import db
