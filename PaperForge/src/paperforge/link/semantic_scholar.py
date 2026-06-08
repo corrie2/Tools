@@ -166,14 +166,30 @@ def enrich_metadata(
     doi: Optional[str] = None,
     title: Optional[str] = None,
 ) -> Optional[dict]:
-    """Try to enrich paper metadata via Semantic Scholar.
+    """Try to enrich paper metadata via Semantic Scholar, with Crossref fallback.
 
     Strategy:
-    1. If DOI provided, query by DOI (most reliable)
-    2. If no DOI or DOI not found, query by title
+    1. If DOI provided, query S2 by DOI (most reliable)
+    2. If no DOI or DOI not found, query S2 by title
+    3. If S2 fails (429, etc.), fall back to Crossref
 
     Returns normalized dict or None.
     """
+    # Try Semantic Scholar first
+    s2_result = _try_semantic_scholar(doi, title)
+    if s2_result:
+        return s2_result
+
+    # Fall back to Crossref
+    logger.info("Semantic Scholar unavailable, trying Crossref fallback...")
+    return _try_crossref(doi, title)
+
+
+def _try_semantic_scholar(
+    doi: Optional[str] = None,
+    title: Optional[str] = None,
+) -> Optional[dict]:
+    """Try Semantic Scholar API."""
     # Try DOI first
     if doi:
         result = get_paper_by_doi(doi)
@@ -186,6 +202,31 @@ def enrich_metadata(
         result = search_by_title(title)
         if result and result.get("title"):
             logger.info("Semantic Scholar found by title: %s", result.get("title"))
+            return result
+
+    return None
+
+
+def _try_crossref(
+    doi: Optional[str] = None,
+    title: Optional[str] = None,
+) -> Optional[dict]:
+    """Try Crossref API as fallback."""
+    from paperforge.link.crossref import get_paper_by_doi as crossref_by_doi
+    from paperforge.link.crossref import search_by_title as crossref_by_title
+
+    # Try DOI first
+    if doi:
+        result = crossref_by_doi(doi)
+        if result and result.get("title"):
+            logger.info("Crossref found by DOI: %s", result.get("title"))
+            return result
+
+    # Try title
+    if title and len(title.strip()) > 5:
+        result = crossref_by_title(title)
+        if result and result.get("title"):
+            logger.info("Crossref found by title: %s", result.get("title"))
             return result
 
     return None

@@ -146,13 +146,17 @@ class TestSemanticScholarAPI:
         assert result is not None
         assert result["title"] == "Found by Title"
 
+    @patch("paperforge.link.crossref.search_by_title")
+    @patch("paperforge.link.crossref.get_paper_by_doi")
     @patch("paperforge.link.semantic_scholar.get_paper_by_doi")
     @patch("paperforge.link.semantic_scholar.search_by_title")
-    def test_enrich_metadata_no_results(self, mock_search, mock_doi):
+    def test_enrich_metadata_no_results(self, mock_s2_search, mock_s2_doi, mock_cf_doi, mock_cf_search):
         from paperforge.link.semantic_scholar import enrich_metadata
 
-        mock_doi.return_value = None
-        mock_search.return_value = None
+        mock_s2_doi.return_value = None
+        mock_s2_search.return_value = None
+        mock_cf_doi.return_value = None
+        mock_cf_search.return_value = None
         result = enrich_metadata(doi="10.1234/nope", title="Nothing Found Here")
         assert result is None
 
