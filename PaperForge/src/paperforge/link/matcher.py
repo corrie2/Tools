@@ -33,6 +33,8 @@ def normalize_title(title: str) -> str:
         return ""
     # Unicode normalize
     normalized = unicodedata.normalize("NFKD", title)
+    # Strip combining marks (accents) after NFKD decomposition
+    normalized = re.sub(r'[\u0300-\u036f]', '', normalized)
     # Lowercase
     normalized = normalized.lower()
     # Remove punctuation (keep word chars and whitespace)
@@ -99,6 +101,13 @@ def match_by_title(
     norm_title = normalize_title(title)
     if len(norm_title) < 5:
         return None
+
+    # Normalize year to int (LLM may return str)
+    if year is not None:
+        try:
+            year = int(year)
+        except (ValueError, TypeError):
+            year = None
 
     # Get all papers from DB
     rows = conn.execute(

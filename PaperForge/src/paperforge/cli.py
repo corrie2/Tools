@@ -202,7 +202,6 @@ def doctor(vault: Path, fix: bool):
         if not ok:
             # Some checks are optional
             if name in ("Config file", "SQLite database", "SQLite schema",
-                        "ENV DEEPSEEK_API_KEY", "ENV DEEPSEEK_BASE_URL",
                         "Papers in database", "Pending citations"):
                 icon = click.style("WARN", fg="yellow")
             else:
@@ -310,14 +309,15 @@ def list_papers(vault: Path, year: int | None, status_filter: str | None, fmt: s
         parser = (p.get("parser") or "")[:col_parser - 1]
         status = (p.get("status") or "")[:col_status - 1]
 
-        # Color code status
+        # Color code status but pad without ANSI codes
         status_color = {
             "completed": "green",
             "partial": "yellow",
             "failed": "red",
             "llm_failed": "red",
         }.get(status, "white")
-        status_str = click.style(status, fg=status_color)
+        status_display = click.style(status, fg=status_color)
+        status_pad = " " * max(0, col_status - len(status))
 
         click.echo(
             f"{slug:<{col_slug}} "
@@ -325,7 +325,7 @@ def list_papers(vault: Path, year: int | None, status_filter: str | None, fmt: s
             f"{str(pyear):<{col_year}} "
             f"{venue:<{col_venue}} "
             f"{parser:<{col_parser}} "
-            f"{status_str}"
+            f"{status_display}{status_pad}"
         )
 
     click.echo(f"\nTotal: {len(papers)} papers")
@@ -444,7 +444,7 @@ def regenerate(slug: str, vault: Path, task_type: str, translate: str):
         sys.exit(1)
 
     paper_text = paper_md.read_text(encoding="utf-8")
-    year = paper.get("year", 2026)
+    year = paper.get("year") or "unknown"
     title = paper.get("title", slug)
 
     from paperforge.llm.client import LLMClient
@@ -570,7 +570,7 @@ def retry(slug: str, vault: Path, translate: str):
         sys.exit(1)
 
     paper_text = paper_md.read_text(encoding="utf-8")
-    year = paper.get("year", 2026)
+    year = paper.get("year") or "unknown"
     title = paper.get("title", slug)
 
     from paperforge.llm.client import LLMClient
@@ -667,7 +667,7 @@ def relink(vault: Path):
     for paper in papers:
         paper_id = paper["id"]
         slug = paper["slug"]
-        year = paper.get("year", 2026)
+        year = paper.get("year") or "unknown"
 
         # Read paper.md
         paper_dir = vault / (paper.get("paper_dir") or "")
@@ -812,7 +812,12 @@ def confirm_ref(source_slug: str, target_slug: str, vault: Path):
     for cand in candidates:
         cand_dict = dict(cand)
         if cand_dict.get("normalized_title") and target.get("normalized_title"):
-            from rapidfuzz import fuzz
+            try:
+                from rapidfuzz import fuzz
+            except ImportError:
+                click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
+                conn.close()
+                sys.exit(1)
             score = fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
             if score >= 80:
                 db.update_candidate_status(conn, cand_dict["id"], "confirmed")
@@ -883,7 +888,12 @@ def reject_ref(source_slug: str, target_slug: str, vault: Path):
     for cand in candidates:
         cand_dict = dict(cand)
         if cand_dict.get("normalized_title") and target.get("normalized_title"):
-            from rapidfuzz import fuzz
+            try:
+                from rapidfuzz import fuzz
+            except ImportError:
+                click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
+                conn.close()
+                sys.exit(1)
             score = fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
             if score >= 80:
                 db.update_candidate_status(conn, cand_dict["id"], "rejected")
@@ -934,6 +944,12 @@ def remove(slug: str, vault: Path, yes: bool):
     paper_id = paper["id"]
     paper_dir = vault / (paper.get("paper_dir") or "")
     title = paper.get("title", slug)
+
+    # Safety check: refuse to delete if paper_dir is invalid or equals vault
+    if not paper.get("paper_dir") or paper_dir.resolve() == vault.resolve():
+        click.echo(click.style("  Error: invalid paper_dir, refusing to delete.", fg="red"))
+        conn.close()
+        sys.exit(1)
 
     # Show what will be deleted
     click.echo(f"Paper: {title}")
@@ -1034,7 +1050,7 @@ def rebuild_index(vault: Path):
     updated = 0
     for paper in papers:
         try:
-            year = paper.get("year", 2026)
+            year = paper.get("year") or "unknown"
             slug = paper["slug"]
             paper_id = paper["id"]
 
@@ -1236,21 +1252,21 @@ def config_cmd(vault: Path):
 
         # Load existing or create new
         if config_path.exists():
-            with io.open(str(config_path)) as f:
+            with io.open(str(config_path), encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {}
 
         # Update LLM section
-        base_url_env = url_env if os.environ.get(url_env) else ""
-        data["llm"] = {
+        llm_dict = {
             "provider": provider,
             "model": model,
             "api_key_env": key_env,
-            "base_url_env": base_url_env,
+            "base_url_env": url_env,
             "timeout_seconds": data.get("llm", {}).get("timeout_seconds", 120),
             "max_retries": data.get("llm", {}).get("max_retries", 3),
         }
+        data["llm"] = llm_dict
 
         with io.open(str(config_path), "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
@@ -1259,8 +1275,7 @@ def config_cmd(vault: Path):
         click.echo(f"  Provider: {provider}")
         click.echo(f"  Model:    {model}")
         click.echo(f"  Key env:  {key_env}")
-        if base_url_env:
-            click.echo(f"  URL env:  {base_url_env}")
+        click.echo(f"  URL env:  {url_env}")
 
     click.echo("")
 

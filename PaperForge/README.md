@@ -36,22 +36,96 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
+### Full Workflow (Example with Mimo)
+
+**Step 1: Set environment variables**
+
+```powershell
+# Windows PowerShell
+$env:MIMO_API_KEY = "your-api-key"
+$env:MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+```
+
 ```bash
-# Check your environment
-paperforge doctor --vault ~/my-vault
+# Linux / macOS
+export MIMO_API_KEY="your-api-key"
+export MIMO_BASE_URL="https://token-plan-cn.xiaomimimo.com/v1"
+```
 
-# Ingest a PDF
-paperforge ingest paper.pdf --vault ~/my-vault
+**Step 2: Configure provider (interactive)**
 
-# Ingest without LLM (faster)
-paperforge ingest paper.pdf --vault ~/my-vault --no-llm
+```bash
+paperforge config --vault D:\data\notespace
+```
 
+This will detect Mimo, let you pick a model, and ask whether to save as default.
+
+**Step 3: Ingest a paper**
+
+```bash
+paperforge ingest paper.pdf --vault D:\data\notespace
+```
+
+**Step 4: View results**
+
+```bash
 # List all papers
-paperforge list --vault ~/my-vault
+paperforge list --vault D:\data\notespace
 
 # View paper details
-paperforge info paper-slug --vault ~/my-vault
+paperforge info paper-slug --vault D:\data\notespace
+
+# Open the vault in Obsidian — papers are under papers/
 ```
+
+### Other Common Commands
+
+```bash
+# Check environment
+paperforge doctor --vault D:\data\notespace
+
+# Skip LLM, parse PDF only (faster)
+paperforge ingest paper.pdf --vault D:\data\notespace --no-llm
+
+# Regenerate summary
+paperforge regenerate paper-slug --vault D:\data\notespace --type summary
+
+# Re-match citations
+paperforge relink --vault D:\data\notespace
+
+# Remove a paper
+paperforge remove paper-slug --vault D:\data\notespace
+
+# Export as zip
+paperforge export --vault D:\data\notespace
+```
+
+### Using Other Providers
+
+Just change the environment variables:
+
+```powershell
+# DeepSeek
+$env:DEEPSEEK_API_KEY = "sk-xxxxxxxx"
+$env:DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+
+# OpenAI
+$env:OPENAI_API_KEY = "sk-xxxxxxxx"
+
+# Zhipu
+$env:ZHIPU_API_KEY = "xxxxxxxx"
+$env:ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+
+# Qwen
+$env:DASHSCOPE_API_KEY = "sk-xxxxxxxx"
+$env:DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# Ollama (local)
+$env:OLLAMA_BASE_URL = "http://localhost:11434/v1"
+$env:OLLAMA_API_KEY = "ollama"
+```
+
+Then run `paperforge config --vault <vault-path>` to select.
 
 ## Configuration
 

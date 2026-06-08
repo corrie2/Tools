@@ -18,7 +18,7 @@ except ImportError:
     _detect_lang = None
 
 
-DOI_RE = re.compile(r"(10\.\d{4,}/\S+?)(?:\s|$|[.,;)\]])")
+DOI_RE = re.compile(r"(10\.\d{4,}/[^\s,;\\\]]+)")
 
 
 def compute_pdf_sha256(pdf_path: Path) -> str:
@@ -34,7 +34,7 @@ def extract_doi(text: str) -> Optional[str]:
     """Extract DOI from text using regex."""
     match = DOI_RE.search(text)
     if match:
-        doi = match.group(1).rstrip(".")
+        doi = match.group(1).rstrip(".,;)]:")
         return doi
     return None
 
@@ -182,16 +182,18 @@ def extract_authors_from_pdf(pdf_path: Path, title: Optional[str] = None) -> lis
         return []
 
 
-def extract_metadata(pdf_path: Path) -> dict:
+def extract_metadata(pdf_path: Path, sha256: Optional[str] = None) -> dict:
     """Extract all metadata from a PDF file.
 
-    Returns dict with: title, authors, doi, language, sha256
+    Returns dict with: title, authors, doi, language, sha256, year
     """
-    sha256 = compute_pdf_sha256(pdf_path)
+    if sha256 is None:
+        sha256 = compute_pdf_sha256(pdf_path)
     title = extract_title_from_pdf(pdf_path)
     authors = extract_authors_from_pdf(pdf_path, title=title)
     doi = None
     language = "unknown"
+    year = None
 
     # Try to extract DOI and detect language from first few pages
     if fitz is not None:
@@ -202,6 +204,29 @@ def extract_metadata(pdf_path: Path) -> dict:
                 text += doc[i].get_text()
             doi = extract_doi(text)
             language = detect_language(text)
+
+            # Extract year from PDF metadata dates
+            pdf_meta = doc.metadata or {}
+            for date_field in ('creationDate', 'modDate'):
+                raw_date = pdf_meta.get(date_field, '') or ''
+                if len(raw_date) >= 4:
+                    m = re.search(r'(\d{4})', raw_date)
+                    if m:
+                        candidate = int(m.group(1))
+                        if 1900 <= candidate <= 2099:
+                            year = candidate
+                            break
+
+            # Fallback: look for year near title on first page
+            if year is None and doc.page_count > 0:
+                first_page_text = doc[0].get_text()[:500]
+                year_matches = re.findall(r'\b(19\d{2}|20\d{2})\b', first_page_text)
+                if year_matches:
+                    for ym in year_matches:
+                        candidate = int(ym)
+                        if 1960 <= candidate <= 2099:
+                            year = candidate
+                            break
         except Exception:
             pass
 
@@ -211,4 +236,5 @@ def extract_metadata(pdf_path: Path) -> dict:
         "doi": doi,
         "language": language,
         "sha256": sha256,
+        "year": year,
     }

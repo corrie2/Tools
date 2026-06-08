@@ -66,219 +66,231 @@ def ingest(
 
     # Initialize database
     conn = db.init_db(config.db_path)
+    temp_dir = None
+    try:
+        # 2. Compute sha256, check for duplicate
+        sha256 = compute_pdf_sha256(pdf_path)
+        existing = db.get_paper_by_sha256(conn, sha256)
+        if existing:
+            return IngestResult(
+                status="duplicate",
+                message=f"PDF already ingested as '{existing['slug']}' (id={existing['id'][:8]}...)",
+            )
 
-    # 2. Compute sha256, check for duplicate
-    sha256 = compute_pdf_sha256(pdf_path)
-    existing = db.get_paper_by_sha256(conn, sha256)
-    if existing:
-        return IngestResult(
-            status="duplicate",
-            message=f"PDF already ingested as '{existing['slug']}' (id={existing['id'][:8]}...)",
-        )
+        # 3. Parse PDF (docling -> fallback)
+        from paperforge.parse.docling_parser import parse_with_docling, ParseResult
+        from paperforge.parse.fallback_parser import parse_with_fallback
 
-    # 3. Parse PDF (docling -> fallback)
-    from paperforge.parse.docling_parser import parse_with_docling, ParseResult
-    from paperforge.parse.fallback_parser import parse_with_fallback
+        # Create a temp output dir for figures during parsing
+        temp_dir = config.data_path / "tmp" / sha256[:12]
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create a temp output dir for figures during parsing
-    temp_dir = config.data_path / "tmp" / sha256[:12]
-    temp_dir.mkdir(parents=True, exist_ok=True)
+        result: Optional[ParseResult] = None
+        fallback_used = False
 
-    result: Optional[ParseResult] = None
-    fallback_used = False
-
-    # Try docling first
-    logger.info("Parsing PDF with Docling...")
-    result = parse_with_docling(
-        pdf_path,
-        output_dir=temp_dir,
-        save_figures=config.parser.save_figures,
-        save_tables=config.parser.save_tables,
-    )
-
-    if result is None:
-        logger.info("Docling failed, falling back to PyMuPDF + pdfplumber...")
-        result = parse_with_fallback(
+        # Try docling first
+        logger.info("Parsing PDF with Docling...")
+        result = parse_with_docling(
             pdf_path,
             output_dir=temp_dir,
             save_figures=config.parser.save_figures,
             save_tables=config.parser.save_tables,
         )
-        fallback_used = True
 
-    if result is None:
-        return IngestResult(
-            status="failed",
-            message="Both Docling and fallback parsers failed",
+        if result is None:
+            logger.info("Docling failed, falling back to PyMuPDF + pdfplumber...")
+            result = parse_with_fallback(
+                pdf_path,
+                output_dir=temp_dir,
+                save_figures=config.parser.save_figures,
+                save_tables=config.parser.save_tables,
+            )
+            fallback_used = True
+
+        if result is None:
+            return IngestResult(
+                status="failed",
+                message="Both Docling and fallback parsers failed",
+            )
+
+        # 4. Extract metadata
+        logger.info("Extracting metadata...")
+        meta = extract_metadata(pdf_path, sha256=sha256)
+
+        # Merge with any metadata from parser
+        title = meta.get("title") or ""
+        authors = meta.get("authors") or []
+        doi = meta.get("doi")
+        language = meta.get("language", "unknown")
+        venue = ""
+        year = meta.get("year")  # None if unknown
+        external_id = None
+
+        # Use DOI from parsed text if not found in metadata
+        if not doi and result.markdown:
+            from paperforge.parse.metadata import extract_doi
+            doi = extract_doi(result.markdown[:3000])
+
+        # 4b. Enrich metadata via Semantic Scholar (non-blocking on failure)
+        try:
+            from paperforge.link.semantic_scholar import enrich_metadata
+            s2_result = enrich_metadata(doi=doi, title=title)
+            if s2_result:
+                # Use S2 data to override/enrich local extraction
+                s2_title = s2_result.get("title", "")
+                if s2_title:
+                    # Only replace title if S2 title is significantly longer (>20%) AND original looks truncated
+                    if len(s2_title) > len(title) * 1.2 and len(title) < 30:
+                        title = s2_title
+                s2_authors = s2_result.get("authors", [])
+                if s2_authors:
+                    authors = s2_authors
+                s2_year = s2_result.get("year")
+                if s2_year:
+                    year = s2_year
+                s2_venue = s2_result.get("venue", "")
+                if s2_venue:
+                    venue = s2_venue
+                s2_doi = s2_result.get("doi")
+                if s2_doi and not doi:
+                    doi = s2_doi
+                external_id = s2_result.get("paperId")
+                logger.info("Enriched metadata from Semantic Scholar (id=%s)", external_id)
+        except Exception as e:
+            logger.warning("Semantic Scholar enrichment failed (continuing with local): %s", e)
+
+        # 5b. Check DOI duplicate (after enrichment may have added DOI)
+        if doi:
+            existing_doi = db.get_paper_by_doi(conn, doi)
+            if existing_doi:
+                return IngestResult(
+                    status="duplicate",
+                    message=f"DOI '{doi}' already ingested as '{existing_doi['slug']}' (id={existing_doi['id'][:8]}...)",
+                )
+
+        # 5c. Generate slug, paper_id
+        slug = generate_slug(title) if title else generate_slug(pdf_path.stem)
+        norm_title = normalize_title(title) if title else ""
+
+        # Determine year (use "unknown" if truly unknown, never default to current year)
+        if not year:
+            year = None
+
+        paper = Paper(
+            slug=slug,
+            title=title,
+            normalized_title=norm_title,
+            authors=authors,
+            year=year,
+            venue=venue or None,
+            doi=doi,
+            language=language,
+            pdf_path=str(pdf_path),
+            pdf_sha256=sha256,
+            parser=result.parser,
+            parse_quality=result.quality,
+            fallback_used=fallback_used,
+            external_id=external_id,
         )
 
-    # 4. Extract metadata
-    logger.info("Extracting metadata...")
-    meta = extract_metadata(pdf_path)
+        # Set vault paths
+        paper.paper_dir = f"papers/{year or 'unknown'}/{slug}"
+        paper.vault_path = f"papers/{year or 'unknown'}/{slug}/index.md"
 
-    # Merge with any metadata from parser
-    title = meta.get("title") or ""
-    authors = meta.get("authors") or []
-    doi = meta.get("doi")
-    language = meta.get("language", "unknown")
-    venue = ""
-    year = meta.get("year")  # None if unknown
-    external_id = None
-
-    # Use DOI from parsed text if not found in metadata
-    if not doi and result.markdown:
-        from paperforge.parse.metadata import extract_doi
-        doi = extract_doi(result.markdown[:3000])
-
-    # 4b. Enrich metadata via Semantic Scholar (non-blocking on failure)
-    try:
-        from paperforge.link.semantic_scholar import enrich_metadata
-        s2_result = enrich_metadata(doi=doi, title=title)
-        if s2_result:
-            # Use S2 data to override/enrich local extraction
-            s2_title = s2_result.get("title", "")
-            if s2_title and len(s2_title) > len(title):
-                title = s2_title
-            s2_authors = s2_result.get("authors", [])
-            if s2_authors:
-                authors = s2_authors
-            s2_year = s2_result.get("year")
-            if s2_year:
-                year = s2_year
-            s2_venue = s2_result.get("venue", "")
-            if s2_venue:
-                venue = s2_venue
-            s2_doi = s2_result.get("doi")
-            if s2_doi and not doi:
-                doi = s2_doi
-            external_id = s2_result.get("paperId")
-            logger.info("Enriched metadata from Semantic Scholar (id=%s)", external_id)
-    except Exception as e:
-        logger.warning("Semantic Scholar enrichment failed (continuing with local): %s", e)
-
-    # 5. Generate slug, paper_id
-    slug = generate_slug(title) if title else generate_slug(pdf_path.stem)
-    norm_title = normalize_title(title) if title else ""
-
-    # Determine year (use "unknown" if truly unknown, never default to current year)
-    if not year:
-        year = None
-
-    paper = Paper(
-        slug=slug,
-        title=title,
-        normalized_title=norm_title,
-        authors=authors,
-        year=year,
-        venue=venue or None,
-        doi=doi,
-        language=language,
-        pdf_path=str(pdf_path),
-        pdf_sha256=sha256,
-        parser=result.parser,
-        parse_quality=result.quality,
-        fallback_used=fallback_used,
-        external_id=external_id,
-    )
-
-    # Set vault paths
-    paper.paper_dir = f"papers/{year or 'unknown'}/{slug}"
-    paper.vault_path = f"papers/{year or 'unknown'}/{slug}/index.md"
-
-    # 6. Write paper.md + figures to vault
-    logger.info("Writing paper files to vault...")
-    paper_dir = write_paper_md(
-        vault=vault,
-        year=year,
-        slug=slug,
-        markdown=result.markdown,
-        figures=result.figures if result.figures else None,
-    )
-
-    # 7. Write index.md
-    logger.info("Writing index.md...")
-    write_index_md(
-        vault=vault,
-        year=year,
-        slug=slug,
-        paper=paper.model_dump(),
-    )
-
-    # 8. Insert into SQLite
-    logger.info("Inserting into database...")
-    db.insert_paper(conn, paper.to_db_dict())
-    task_id = db.insert_task(conn, paper.id, "ingest")
-    db.update_task_status(conn, task_id, "running")
-    db.update_task_status(conn, task_id, "completed", output_path=paper.vault_path)
-
-    # 9. Update papers/index.md
-    logger.info("Updating papers index...")
-    all_papers = db.list_papers(conn)
-    write_papers_index(vault, all_papers)
-
-    # 10. LLM generation (if not skipped)
-    llm_success_count = 0
-    llm_total = 0
-
-    if not no_llm:
-        logger.info("Running LLM generation steps...")
-        llm_success_count, llm_total = _run_llm_steps(
-            conn=conn,
-            paper_id=paper.id,
+        # 6. Write paper.md + figures to vault
+        logger.info("Writing paper files to vault...")
+        paper_dir = write_paper_md(
             vault=vault,
             year=year,
             slug=slug,
-            title=title,
-            paper_text=result.markdown,
-            translate_mode=translate,
-            config=config,
+            markdown=result.markdown,
+            figures=result.figures if result.figures else None,
         )
-        # Update paper status based on LLM results
-        if llm_total > 0:
-            if llm_success_count == llm_total:
-                db.update_paper_status(conn, paper.id, "completed")
-            elif llm_success_count > 0:
-                db.update_paper_status(conn, paper.id, "partial")
-            else:
-                db.update_paper_status(conn, paper.id, "llm_failed")
-    else:
-        # Mark LLM tasks as skipped
-        for task_type in ["summary", "qa", "glossary", "translate"]:
-            task_id = db.insert_task(conn, paper.id, task_type)
-            db.update_task_status(conn, task_id, "skipped")
 
-    # Clean up temp dir
-    import shutil
-    shutil.rmtree(temp_dir, ignore_errors=True)
+        # 7. Write index.md
+        logger.info("Writing index.md...")
+        write_index_md(
+            vault=vault,
+            year=year,
+            slug=slug,
+            paper=paper.model_dump(),
+        )
 
-    # 11. Extract references and build citation graph (always runs, regardless of no_llm)
-    _run_reference_linking(conn, paper.id, vault, year, slug, title, result.markdown, config)
+        # 8. Insert into SQLite
+        logger.info("Inserting into database...")
+        db.insert_paper(conn, paper.to_db_dict())
+        task_id = db.insert_task(conn, paper.id, "ingest")
+        db.update_task_status(conn, task_id, "running")
+        db.update_task_status(conn, task_id, "completed", output_path=paper.vault_path)
 
-    conn.close()
+        # 9. Update papers/index.md
+        logger.info("Updating papers index...")
+        all_papers = db.list_papers(conn)
+        write_papers_index(vault, all_papers)
 
-    # Build message
-    status = "completed"
-    msg = f"Successfully ingested '{title}' ({result.parser}, {result.quality})"
-    if not no_llm and llm_total > 0:
-        msg += f" [LLM: {llm_success_count}/{llm_total} steps OK]"
-        if llm_success_count < llm_total:
-            status = "partial"
+        # 10. LLM generation (if not skipped)
+        llm_success_count = 0
+        llm_total = 0
 
-    return IngestResult(
-        paper=paper,
-        status=status,
-        parser_used=result.parser,
-        fallback_used=fallback_used,
-        message=msg,
-        paper_dir=paper_dir,
-    )
+        if not no_llm:
+            logger.info("Running LLM generation steps...")
+            llm_success_count, llm_total = _run_llm_steps(
+                conn=conn,
+                paper_id=paper.id,
+                vault=vault,
+                year=year,
+                slug=slug,
+                title=title,
+                paper_text=result.markdown,
+                translate_mode=translate,
+                config=config,
+            )
+            # Update paper status based on LLM results
+            if llm_total > 0:
+                if llm_success_count == llm_total:
+                    db.update_paper_status(conn, paper.id, "completed")
+                elif llm_success_count > 0:
+                    db.update_paper_status(conn, paper.id, "partial")
+                else:
+                    db.update_paper_status(conn, paper.id, "llm_failed")
+        else:
+            # Mark LLM tasks as skipped
+            for task_type in ["summary", "qa", "glossary", "translate"]:
+                task_id = db.insert_task(conn, paper.id, task_type)
+                db.update_task_status(conn, task_id, "skipped")
+
+        # 11. Extract references and build citation graph (always runs, regardless of no_llm)
+        _run_reference_linking(conn, paper.id, vault, year, slug, title, result.markdown, config)
+
+        # Build message
+        status = "completed"
+        msg = f"Successfully ingested '{title}' ({result.parser}, {result.quality})"
+        if not no_llm and llm_total > 0:
+            msg += f" [LLM: {llm_success_count}/{llm_total} steps OK]"
+            if llm_success_count < llm_total:
+                status = "partial"
+
+        return IngestResult(
+            paper=paper,
+            status=status,
+            parser_used=result.parser,
+            fallback_used=fallback_used,
+            message=msg,
+            paper_dir=paper_dir,
+        )
+    finally:
+        # Clean up temp dir if it was created
+        if temp_dir is not None:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        conn.close()
 
 
 def _run_llm_steps(
     conn,
     paper_id: str,
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     title: str,
     paper_text: str,
@@ -382,7 +394,7 @@ def _run_reference_linking(
     conn,
     paper_id: str,
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     title: str,
     paper_text: str,
@@ -409,7 +421,6 @@ def _run_reference_linking(
     )
     from datetime import datetime, timezone
     from uuid import uuid4
-    import json as _json
 
     task_id = db.insert_task(conn, paper_id, "references")
     db.update_task_status(conn, task_id, "running")
@@ -476,7 +487,7 @@ def _run_reference_linking(
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         ref_id, paper_id, raw_text,
-                        _json.dumps(parsed_authors) if parsed_authors else None,
+                        json.dumps(parsed_authors) if parsed_authors else None,
                         parsed_title or None, norm_title or None,
                         parsed_year, parsed_venue, parsed_doi,
                         idx + 1, "llm", now,
@@ -497,7 +508,7 @@ def _run_reference_linking(
                     (
                         candidate_id, paper_id, ref_id,
                         parsed_title, norm_title,
-                        _json.dumps(parsed_authors) if parsed_authors else None,
+                        json.dumps(parsed_authors) if parsed_authors else None,
                         parsed_year, parsed_venue, parsed_doi,
                         result.paper_id, result.match_method,
                         result.confidence, result.status, now, now,

@@ -112,8 +112,8 @@ def parse_with_docling(
             try:
                 for table in doc.tables:
                     tables.append(table.export_to_markdown())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Table extraction failed: %s", e)
 
         return ParseResult(
             markdown=markdown,

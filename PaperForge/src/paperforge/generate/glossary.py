@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+
 
 from paperforge.llm.client import LLMClient
 from paperforge.llm.prompts import GLOSSARY_SYSTEM, GLOSSARY_USER
@@ -44,6 +44,11 @@ def generate_glossary(paper_text: str, llm_client: LLMClient) -> GlossaryResult:
 
     content = response["choices"][0]["message"]["content"]
     data = json.loads(content)
+
+    # Validate required fields
+    if "entries" not in data:
+        logger.warning("LLM response missing 'entries' field")
+        data["entries"] = []
 
     result = GlossaryResult(**data)
     logger.info("Generated %d glossary entries", len(result.entries))

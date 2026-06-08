@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -163,7 +164,7 @@ def load_config(vault: Path) -> Config:
         config_dir.mkdir(parents=True, exist_ok=True)
 
     if config_path.exists():
-        with open(config_path) as f:
+        with open(config_path, encoding='utf-8') as f:
             data = yaml.safe_load(f) or {}
 
         vault_cfg = data.get("vault", {})
@@ -171,11 +172,16 @@ def load_config(vault: Path) -> Config:
         config.data_dir = vault_cfg.get("data_dir", "paperforge")
 
         llm_cfg = data.get("llm", {})
+        provider_name = llm_cfg.get("provider", "deepseek")
+        # Resolve provider-aware defaults for api_key_env and base_url_env
+        pcfg = get_provider_config(provider_name)
+        default_key_env = pcfg[0] if pcfg else "DEEPSEEK_API_KEY"
+        default_url_env = pcfg[1] if pcfg else "DEEPSEEK_BASE_URL"
         config.llm = LLMConfig(
-            provider=llm_cfg.get("provider", "deepseek"),
+            provider=provider_name,
             model=llm_cfg.get("model", "deepseek-v4-pro"),
-            api_key_env=llm_cfg.get("api_key_env", "DEEPSEEK_API_KEY"),
-            base_url_env=llm_cfg.get("base_url_env", "DEEPSEEK_BASE_URL"),
+            api_key_env=llm_cfg.get("api_key_env", default_key_env),
+            base_url_env=llm_cfg.get("base_url_env", default_url_env),
             timeout_seconds=llm_cfg.get("timeout_seconds", 120),
             max_retries=llm_cfg.get("max_retries", 3),
         )

@@ -13,112 +13,6 @@ from paperforge.store import db
 logger = logging.getLogger(__name__)
 
 
-def process_references(
-    paper_id: str,
-    references: List[dict],
-    conn,
-    config=None,
-) -> dict:
-    """Process extracted references: match and create citation edges.
-
-    Args:
-        paper_id: Source paper ID.
-        references: List of structured reference dicts.
-        conn: SQLite connection.
-        config: Config object.
-
-    Returns:
-        Summary dict with counts: total, confirmed, pending, unmatched.
-    """
-    from paperforge.link.matcher import match_reference, normalize_title
-
-    stats = {"total": len(references), "confirmed": 0, "pending": 0, "unmatched": 0, "errors": 0}
-
-    for idx, ref in enumerate(references):
-        try:
-            raw_text = ref.get("_raw", ref.get("title", ""))
-            parsed_title = ref.get("title", "")
-            parsed_authors = ref.get("authors", [])
-            parsed_year = ref.get("year")
-            parsed_venue = ref.get("venue")
-            parsed_doi = ref.get("doi")
-            norm_title = normalize_title(parsed_title) if parsed_title else ""
-
-            # Insert raw reference
-            ref_id = uuid4().hex
-            now = datetime.now(timezone.utc).isoformat()
-            import json as _json
-            conn.execute(
-                """INSERT OR IGNORE INTO references_raw
-                   (id, source_paper_id, raw_text, parsed_authors, parsed_title,
-                    normalized_title, parsed_year, parsed_venue, parsed_doi,
-                    sequence_num, extraction_method, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    ref_id, paper_id, raw_text,
-                    _json.dumps(parsed_authors) if parsed_authors else None,
-                    parsed_title or None,
-                    norm_title or None,
-                    parsed_year,
-                    parsed_venue,
-                    parsed_doi,
-                    idx + 1,
-                    "llm",
-                    now,
-                ),
-            )
-
-            # Try matching
-            result = match_reference(ref, conn, config.citation if config else None)
-
-            # Insert candidate
-            candidate_id = uuid4().hex
-            conn.execute(
-                """INSERT INTO reference_candidates
-                   (id, source_paper_id, raw_reference_id, title, normalized_title,
-                    authors, year, venue, doi, matched_paper_id,
-                    match_method, confidence, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    candidate_id, paper_id, ref_id,
-                    parsed_title, norm_title,
-                    _json.dumps(parsed_authors) if parsed_authors else None,
-                    parsed_year, parsed_venue, parsed_doi,
-                    result.paper_id,
-                    result.match_method,
-                    result.confidence,
-                    result.status,
-                    now, now,
-                ),
-            )
-
-            # Create citation edge for confirmed matches
-            if result.status == "confirmed" and result.paper_id:
-                conn.execute(
-                    """INSERT OR REPLACE INTO citation_edges
-                       (source_paper_id, target_paper_id, raw_reference_id,
-                        match_method, confidence, confirmed, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        paper_id, result.paper_id, ref_id,
-                        result.match_method, result.confidence, 1,
-                        now, now,
-                    ),
-                )
-                stats["confirmed"] += 1
-            elif result.status == "pending":
-                stats["pending"] += 1
-            else:
-                stats["unmatched"] += 1
-
-        except Exception as e:
-            logger.error("Error processing reference %d: %s", idx, e)
-            stats["errors"] += 1
-
-    conn.commit()
-    return stats
-
-
 def generate_citation_section(paper_id: str, conn) -> dict:
     """Query citation edges for a paper.
 
@@ -199,11 +93,14 @@ def update_index_md(vault: Path, paper: dict, conn) -> Path:
 
     Returns:
         Path to updated index.md.
+
+    Note: pending_review.md rendering is not yet implemented.
+          Low-confidence references are shown in the pending_refs section of index.md.
     """
     from paperforge.store.writer import write_index_md
 
     paper_id = paper["id"]
-    year = paper.get("year", 2026)
+    year = paper.get("year") or "unknown"
     slug = paper["slug"]
 
     citation_data = generate_citation_section(paper_id, conn)
@@ -230,7 +127,8 @@ def update_cited_papers_index(vault: Path, paper_id: str, conn) -> List[Path]:
     rows = conn.execute(
         """SELECT p.* FROM citation_edges ce
            JOIN papers p ON p.id = ce.target_paper_id
-           WHERE ce.source_paper_id = ?""",
+           WHERE ce.source_paper_id = ?
+             AND ce.target_paper_id != ce.source_paper_id""",
         (paper_id,),
     ).fetchall()
 
@@ -255,7 +153,8 @@ def update_citing_papers_index(vault: Path, paper_id: str, conn) -> List[Path]:
     rows = conn.execute(
         """SELECT p.* FROM citation_edges ce
            JOIN papers p ON p.id = ce.source_paper_id
-           WHERE ce.target_paper_id = ?""",
+           WHERE ce.target_paper_id = ?
+             AND ce.source_paper_id != ce.target_paper_id""",
         (paper_id,),
     ).fetchall()
 

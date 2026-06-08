@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA_SQL = """
@@ -139,6 +142,35 @@ def init_db(db_path: Path) -> sqlite3.Connection:
 
 # --- Paper CRUD ---
 
+# Valid column names for each table (used for SQL injection prevention)
+_VALID_COLUMNS = {
+    "papers": {
+        "id", "slug", "title", "normalized_title", "authors", "year", "venue",
+        "doi", "language", "pdf_path", "pdf_sha256", "vault_path", "paper_dir",
+        "parser", "parse_quality", "fallback_used", "processed_at", "updated_at",
+        "status", "external_id",
+    },
+    "references_raw": {
+        "id", "source_paper_id", "raw_text", "parsed_authors", "parsed_title",
+        "normalized_title", "parsed_year", "parsed_venue", "parsed_doi",
+        "sequence_num", "extraction_method", "created_at",
+    },
+    "reference_candidates": {
+        "id", "source_paper_id", "raw_reference_id", "title", "normalized_title",
+        "authors", "year", "venue", "doi", "external_id", "matched_paper_id",
+        "match_method", "confidence", "status", "created_at", "updated_at",
+    },
+}
+
+
+def _validate_columns(data: dict, table: str) -> dict:
+    """Filter dict to only include valid columns for the given table."""
+    valid = _VALID_COLUMNS.get(table)
+    if valid is None:
+        return data  # No validation defined
+    return {k: v for k, v in data.items() if k in valid}
+
+
 def insert_paper(conn: sqlite3.Connection, paper: dict) -> None:
     """Insert a paper record. authors should be a list, will be JSON-serialized."""
     authors = paper.get("authors", [])
@@ -149,6 +181,7 @@ def insert_paper(conn: sqlite3.Connection, paper: dict) -> None:
     paper.setdefault("processed_at", now)
     paper.setdefault("updated_at", now)
 
+    paper = _validate_columns(paper, "papers")
     cols = ", ".join(paper.keys())
     placeholders = ", ".join(["?"] * len(paper))
     sql = f"INSERT OR REPLACE INTO papers ({cols}) VALUES ({placeholders})"
@@ -240,7 +273,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         try:
             d["authors"] = json.loads(d["authors"])
         except (json.JSONDecodeError, TypeError):
-            pass
+            logger.warning("Failed to parse authors JSON: %s", d["authors"][:100])
     return d
 
 
@@ -248,6 +281,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 def insert_reference_raw(conn: sqlite3.Connection, ref: dict) -> None:
     """Insert a raw reference record."""
+    ref = _validate_columns(ref, "references_raw")
     cols = ", ".join(ref.keys())
     placeholders = ", ".join(["?"] * len(ref))
     sql = f"INSERT OR IGNORE INTO references_raw ({cols}) VALUES ({placeholders})"
@@ -268,6 +302,7 @@ def get_references_for_paper(conn: sqlite3.Connection, paper_id: str) -> List[di
 
 def insert_reference_candidate(conn: sqlite3.Connection, candidate: dict) -> None:
     """Insert a reference candidate record."""
+    candidate = _validate_columns(candidate, "reference_candidates")
     cols = ", ".join(candidate.keys())
     placeholders = ", ".join(["?"] * len(candidate))
     sql = f"INSERT INTO reference_candidates ({cols}) VALUES ({placeholders})"
@@ -315,7 +350,7 @@ def insert_citation_edge(
     """Insert a citation edge (source cites target)."""
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        """INSERT OR REPLACE INTO citation_edges
+        """INSERT OR IGNORE INTO citation_edges
            (source_paper_id, target_paper_id, raw_reference_id,
             match_method, confidence, confirmed, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",

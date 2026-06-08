@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+
 
 from paperforge.llm.client import LLMClient
 from paperforge.llm.prompts import SUMMARY_SYSTEM, SUMMARY_USER
@@ -45,6 +45,12 @@ def generate_summary(paper_text: str, llm_client: LLMClient) -> SummaryResult:
 
     content = response["choices"][0]["message"]["content"]
     data = json.loads(content)
+
+    # Validate required fields
+    required_fields = ["one_sentence_summary"]
+    missing = [f for f in required_fields if f not in data or not data[f]]
+    if missing:
+        logger.warning("LLM response missing fields: %s", missing)
 
     result = SummaryResult(**data)
     logger.info("Generated summary: %s", result.one_sentence_summary[:80])

@@ -40,16 +40,17 @@ def normalize_title(title: str) -> str:
     """Normalize title for deduplication matching.
 
     Rules:
+    - NFKD normalization and accent stripping
     - lowercase
     - strip all punctuation
     - normalize whitespace
     """
-    normalized = title.lower().strip()
-    # Remove all punctuation
-    normalized = re.sub(r"[^\w\s]", "", normalized)
-    # Collapse whitespace
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    text = unicodedata.normalize('NFKD', title)
+    text = re.sub(r'[\u0300-\u036f]', '', text)  # strip combining marks
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 
 class Paper(BaseModel):

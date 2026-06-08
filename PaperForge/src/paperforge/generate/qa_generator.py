@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+
 
 from paperforge.llm.client import LLMClient
 from paperforge.llm.prompts import QA_SYSTEM, QA_USER
@@ -44,6 +44,11 @@ def generate_qa(paper_text: str, llm_client: LLMClient) -> QAResult:
 
     content = response["choices"][0]["message"]["content"]
     data = json.loads(content)
+
+    # Validate required fields
+    if "questions" not in data:
+        logger.warning("LLM response missing 'questions' field")
+        data["questions"] = []
 
     result = QAResult(**data)
     logger.info("Generated %d Q&A pairs", len(result.questions))

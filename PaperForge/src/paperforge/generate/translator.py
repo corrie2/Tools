@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import List
 
 from paperforge.llm.client import LLMClient
 from paperforge.llm.prompts import TRANSLATE_SYSTEM, TRANSLATE_USER
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHUNK_SIZE = 3000
 
 
-def _split_into_chunks(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[str]:
+def _split_into_chunks(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[str]:
     """Split text into chunks at paragraph boundaries.
 
     Args:

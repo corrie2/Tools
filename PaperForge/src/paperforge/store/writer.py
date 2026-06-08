@@ -20,7 +20,7 @@ def _get_template_env() -> Environment:
 
 def write_paper_md(
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     markdown: str,
     figures: Optional[Dict[str, Path]] = None,
@@ -57,7 +57,7 @@ def write_paper_md(
 
 def write_index_md(
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     paper: dict,
     tags: Optional[List[str]] = None,
@@ -106,7 +106,6 @@ def write_index_md(
         parse_quality=paper.get("parse_quality", "medium"),
         fallback_used=paper.get("fallback_used", 0),
         tags=tags or [],
-        keywords=[],
         has_translation=False,
         one_sentence_summary=one_sentence_summary or "",
         citing_papers=citing_papers or [],
@@ -123,7 +122,7 @@ def write_index_md(
 
 def write_summary_md(
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     title: str,
     summary_result,
@@ -163,7 +162,7 @@ def write_summary_md(
 
 def write_qa_md(
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     title: str,
     qa_result,
@@ -197,7 +196,7 @@ def write_qa_md(
 
 def write_glossary_md(
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     title: str,
     glossary_result,
@@ -239,7 +238,7 @@ def write_glossary_md(
 
 def write_translate_md(
     vault: Path,
-    year: int,
+    year: int | None,
     slug: str,
     translated_text: str,
 ) -> Path:

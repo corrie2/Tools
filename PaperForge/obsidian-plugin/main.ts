@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Modal, Notice, TFile, ItemView, WorkspaceLeaf } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Modal, Notice, ItemView, WorkspaceLeaf } from 'obsidian';
 import { spawn } from 'child_process';
 import * as path from 'path';
 
@@ -71,6 +71,7 @@ export default class PaperForgePlugin extends Plugin {
   }
 
   getVaultPath(): string {
+    // Note: basePath is Electron-specific (desktop only). Won't work on Obsidian Mobile.
     const adapter = this.app.vault.adapter;
     if ('basePath' in adapter) {
       return (adapter as any).basePath;
@@ -185,7 +186,7 @@ export default class PaperForgePlugin extends Plugin {
       return;
     }
 
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = this.app.workspace.getLeaf('split');
     if (leaf) {
       await leaf.setViewState({
         type: 'paperforge-dashboard',
@@ -243,8 +244,10 @@ class ProgressModal extends Modal {
 interface PaperEntry {
   slug: string;
   title: string;
-  year: string;
+  year: number;
   status: string;
+  paper_dir?: string;
+  venue?: string;
 }
 
 class PaperForgeDashboard extends ItemView {

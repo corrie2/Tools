@@ -12,8 +12,8 @@ from paperforge.config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
-# Default base URL if env var not set
-DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+# Default base URL - must be set via config or environment variable
+DEFAULT_BASE_URL = ""
 
 
 class LLMClient:
@@ -30,6 +30,12 @@ class LLMClient:
         if not self.api_key:
             raise ValueError(
                 f"API key not found. Set the {config.api_key_env} environment variable."
+            )
+
+        if not self.base_url:
+            raise ValueError(
+                f"Base URL not configured. Set the {config.base_url_env} environment variable "
+                f"or run 'paperforge config' to configure."
             )
 
     def chat_completion(
