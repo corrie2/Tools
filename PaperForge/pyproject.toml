@@ -16,6 +16,7 @@ dependencies = [
     "langdetect",
     "pydantic>=2.0",
     "pyyaml",
+    "rapidfuzz",
 ]
 
 [project.optional-dependencies]
