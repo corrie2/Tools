@@ -323,7 +323,9 @@ class PaperForgeDashboard extends ItemView {
         slugEl.textContent = paper.slug;
 
         item.addEventListener('click', () => {
-          const indexPath = `${this.plugin.settings.papersDir}/${paper.slug}/index.md`;
+          const indexPath = paper.paper_dir
+            ? `${paper.paper_dir}/index.md`
+            : `${this.plugin.settings.papersDir}/${paper.year}/${paper.slug}/index.md`;
           this.app.workspace.openLinkText(indexPath, '', true);
         });
       }
