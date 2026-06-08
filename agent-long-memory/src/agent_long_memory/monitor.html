@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Long Memory Monitor</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: #f6f7f9;
+            color: #1f2937;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        }
+        .container {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .header {
+            background: #163b66;
+            color: #fff;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 18px;
+        }
+        .header h1 {
+            margin: 0 0 6px;
+            font-size: 28px;
+        }
+        .header p {
+            margin: 0;
+            color: #dbeafe;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 18px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+        }
+        .number {
+            font-size: 32px;
+            font-weight: 700;
+            color: #163b66;
+        }
+        .label {
+            margin-top: 4px;
+            color: #6b7280;
+            font-size: 13px;
+        }
+        .section {
+            margin-bottom: 18px;
+        }
+        .section h2 {
+            margin: 0 0 12px;
+            color: #163b66;
+            font-size: 20px;
+        }
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        input, select, button {
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: 14px;
+        }
+        input {
+            flex: 1;
+            min-width: 240px;
+        }
+        button {
+            background: #163b66;
+            border-color: #163b66;
+            color: #fff;
+            cursor: pointer;
+        }
+        button:hover { background: #20558f; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th, td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            color: #374151;
+            background: #f9fafb;
+            font-weight: 600;
+        }
+        .path {
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+            word-break: break-all;
+        }
+        .badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 3px 9px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-ok {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .badge-muted {
+            background: #f3f4f6;
+            color: #4b5563;
+        }
+        .badge-warn {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .record-item {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 12px 0;
+        }
+        .record-title {
+            font-weight: 700;
+        }
+        .record-content {
+            margin-top: 4px;
+            color: #4b5563;
+            font-size: 13px;
+        }
+        .record-meta {
+            margin-top: 6px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .empty, .error {
+            color: #6b7280;
+            padding: 12px 0;
+        }
+        .error { color: #b91c1c; }
+        .refresh-btn {
+            position: fixed;
+            right: 22px;
+            bottom: 22px;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            font-size: 20px;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Agent Long Memory Monitor</h1>
+            <p>Project-scoped memory status, access list, and recent records.</p>
+        </div>
+
+        <div class="stats-grid" id="stats">
+            <div class="card"><div class="number">-</div><div class="label">Total records</div></div>
+            <div class="card"><div class="number">-</div><div class="label">Projects</div></div>
+            <div class="card"><div class="number">-</div><div class="label">Embeddings</div></div>
+            <div class="card"><div class="number">-</div><div class="label">Recent 24h</div></div>
+        </div>
+
+        <div class="card section">
+            <h2>Memory Access</h2>
+            <div id="accessStatus" class="empty">Loading...</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Allowed workspace</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="allowedWorkspaces"></tbody>
+            </table>
+        </div>
+
+        <div class="card section">
+            <h2>Registered Projects</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Root path</th>
+                        <th>Records</th>
+                        <th>Access</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody id="projects"></tbody>
+            </table>
+        </div>
+
+        <div class="card section">
+            <h2>Search Records</h2>
+            <div class="toolbar">
+                <input type="text" id="keyword" placeholder="Search title or content">
+                <select id="typeFilter"><option value="">All types</option></select>
+                <button onclick="searchRecords()">Search</button>
+                <button onclick="loadData()">Refresh</button>
+            </div>
+        </div>
+
+        <div class="card section">
+            <h2>Recent Records</h2>
+            <div id="records" class="empty">Loading...</div>
+        </div>
+
+        <div class="card section">
+            <h2>Type Distribution</h2>
+            <div id="typeChart" class="empty">Loading...</div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="loadData()">R</button>
+
+    <script>
+        const API_BASE = "";
+
+        async function loadData() {
+            await Promise.all([
+                loadStats(),
+                loadAccess(),
+                loadTypes(),
+                loadRecords()
+            ]);
+        }
+
+        async function loadStats() {
+            try {
+                const data = await fetchJson("/api/stats");
+                document.getElementById("stats").innerHTML = `
+                    <div class="card"><div class="number">${data.total_records}</div><div class="label">Total records</div></div>
+                    <div class="card"><div class="number">${data.projects}</div><div class="label">Projects</div></div>
+                    <div class="card"><div class="number">${data.embeddings}</div><div class="label">Embeddings</div></div>
+                    <div class="card"><div class="number">${data.recent_24h}</div><div class="label">Recent 24h</div></div>
+                `;
+                renderTypeChart(data.types || {});
+            } catch (error) {
+                document.getElementById("stats").innerHTML = `<div class="card error">Failed to load stats: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        async function loadAccess() {
+            try {
+                const data = await fetchJson("/api/access");
+                const mode = data.allowlist_enabled ? "Only listed workspaces can use memory." : "Allowlist is off. All workspaces can use memory.";
+                document.getElementById("accessStatus").innerHTML = `
+                    <span class="badge ${data.enabled ? "badge-ok" : "badge-warn"}">${data.enabled ? "memory enabled" : "memory disabled"}</span>
+                    <span class="badge ${data.allowlist_enabled ? "badge-ok" : "badge-muted"}">${escapeHtml(mode)}</span>
+                    <div class="path" style="margin-top: 8px;">Projects file: ${escapeHtml(data.projects_file || "")}</div>
+                `;
+
+                const allowedBody = document.getElementById("allowedWorkspaces");
+                if (!data.allowed_workspaces.length) {
+                    allowedBody.innerHTML = `<tr><td colspan="2" class="empty">No allowlist configured.</td></tr>`;
+                } else {
+                    allowedBody.innerHTML = data.allowed_workspaces.map(item => `
+                        <tr>
+                            <td class="path">${escapeHtml(item.root_path)}</td>
+                            <td>${item.registered ? badge("registered", "ok") : badge("allowed, no records yet", "warn")}</td>
+                        </tr>
+                    `).join("");
+                }
+
+                const projectsBody = document.getElementById("projects");
+                if (!data.projects.length) {
+                    projectsBody.innerHTML = `<tr><td colspan="5" class="empty">No projects registered in the database.</td></tr>`;
+                } else {
+                    projectsBody.innerHTML = data.projects.map(project => `
+                        <tr>
+                            <td>${escapeHtml(project.name)}</td>
+                            <td class="path">${escapeHtml(project.root_path)}</td>
+                            <td>${project.record_count}</td>
+                            <td>${project.allowed ? badge("allowed", "ok") : badge("blocked", "muted")}</td>
+                            <td>${project.created_at ? formatDate(project.created_at) : ""}</td>
+                        </tr>
+                    `).join("");
+                }
+            } catch (error) {
+                document.getElementById("accessStatus").innerHTML = `<div class="error">Failed to load access data: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        async function loadRecords(memoryType = "", keyword = "") {
+            try {
+                let url = "/api/records?limit=50";
+                if (memoryType) url += `&memory_type=${encodeURIComponent(memoryType)}`;
+                if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+                const data = await fetchJson(url);
+                const container = document.getElementById("records");
+                if (!data.records.length) {
+                    container.innerHTML = `<div class="empty">No records.</div>`;
+                    return;
+                }
+                container.innerHTML = data.records.map(record => `
+                    <div class="record-item">
+                        <div class="record-title">${escapeHtml(record.title)}</div>
+                        <div class="record-content">${escapeHtml(record.content)}</div>
+                        <div class="record-meta">
+                            ${badge(record.memory_type, "muted")}
+                            ${record.project_name ? badge(record.project_name, "muted") : ""}
+                            ${record.created_at ? badge(formatDate(record.created_at), "muted") : ""}
+                        </div>
+                    </div>
+                `).join("");
+            } catch (error) {
+                document.getElementById("records").innerHTML = `<div class="error">Failed to load records: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        async function loadTypes() {
+            try {
+                const data = await fetchJson("/api/types");
+                document.getElementById("typeFilter").innerHTML =
+                    `<option value="">All types</option>` +
+                    data.types.map(type => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        function searchRecords() {
+            loadRecords(
+                document.getElementById("typeFilter").value,
+                document.getElementById("keyword").value
+            );
+        }
+
+        function renderTypeChart(types) {
+            const entries = Object.entries(types);
+            const container = document.getElementById("typeChart");
+            if (!entries.length) {
+                container.innerHTML = `<div class="empty">No type data.</div>`;
+                return;
+            }
+            container.innerHTML = entries.map(([type, count]) => `
+                <div style="margin: 8px 0;">
+                    <strong>${escapeHtml(type)}</strong>: ${count}
+                </div>
+            `).join("");
+        }
+
+        async function fetchJson(path) {
+            const response = await fetch(`${API_BASE}${path}`);
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            return response.json();
+        }
+
+        function badge(text, kind) {
+            const cls = kind === "ok" ? "badge-ok" : kind === "warn" ? "badge-warn" : "badge-muted";
+            return `<span class="badge ${cls}">${escapeHtml(text)}</span>`;
+        }
+
+        function formatDate(value) {
+            return new Date(value).toLocaleString();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text == null ? "" : String(text);
+            return div.innerHTML;
+        }
+
+        window.onload = loadData;
+        setInterval(loadData, 30000);
+    </script>
+</body>
+</html>

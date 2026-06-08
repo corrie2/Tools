@@ -1,13 +1,28 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from agent_long_memory.memory_config import MemoryConfig, load_memory_config
 from agent_long_memory.memory_scope import ProjectScope
 
+# 审计日志
+logger = logging.getLogger("agent_long_memory")
+
 
 class MemoryDbError(RuntimeError):
+    """记忆数据库错误"""
+    pass
+
+
+class MemoryNotFoundError(MemoryDbError):
+    """记录未找到"""
+    pass
+
+
+class MemoryValidationError(MemoryDbError):
+    """输入验证错误"""
     pass
 
 
@@ -24,7 +39,7 @@ class CreateMemoryRecordInput:
     memory_type: str
     title: str
     content: str
-    source_type: str | None = None
+    source_type: str = "agent"
     source_ref: str | None = None
     module_path: str | None = None
     tags: list[str] | None = None
@@ -61,6 +76,46 @@ class MemorySearchResult:
     record: MemoryRecord
     similarity: float
     embedding_model: str
+
+
+# 连接池管理
+_pool = None
+
+
+def _get_pool(config: MemoryConfig):
+    """获取或创建连接池"""
+    global _pool
+    if _pool is None:
+        try:
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:
+            raise RuntimeError(
+                'psycopg_pool is not installed. Install it: pip install psycopg_pool'
+            ) from exc
+
+        if not config.database_url:
+            raise MemoryDbError("PPT_AGENT_MEMORY_DATABASE_URL is not set")
+
+        _pool = ConnectionPool(
+            config.database_url,
+            kwargs={"connect_timeout": config.connect_timeout_seconds},
+            min_size=config.min_pool_size,
+            max_size=config.max_pool_size,
+            timeout=config.connect_timeout_seconds,
+            reconnect_timeout=config.connect_timeout_seconds,
+        )
+        logger.info(f"Created connection pool: min={config.min_pool_size}, max={config.max_pool_size}")
+
+    return _pool
+
+
+def close_pool():
+    """关闭连接池"""
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+        logger.info("Closed connection pool")
 
 
 class PostgresMemoryStore:
@@ -129,10 +184,14 @@ class PostgresMemoryStore:
             ORDER BY e.embedding <=> %s::vector
             LIMIT %s
         """
-        with self._connect() as conn:
+        config = MemoryConfig(enabled=True, database_url=self.database_url, embedding_model="")
+        conn = self._connect()
+        try:
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
+        finally:
+            release_connection(conn, config)
         return [
             MemorySearchResult(record=_record_from_row(row), similarity=float(row[11]), embedding_model=row[12])
             for row in rows
@@ -147,18 +206,58 @@ class PostgresMemoryStore:
 
 
 def connect_memory_db(config: MemoryConfig):
+    """获取数据库连接（优先使用连接池）"""
     if not config.database_url:
         raise ValueError("PPT_AGENT_MEMORY_DATABASE_URL is required")
 
     try:
-        import psycopg
-    except ImportError as exc:
-        raise RuntimeError('psycopg is not installed. Install the memory extra first: pip install -e ".[memory]"') from exc
+        if not config.use_pool:
+            raise RuntimeError("connection pool disabled")
+        pool = _get_pool(config)
+        return pool.getconn()
+    except Exception:
+        # 回退到直接连接
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError('psycopg is not installed. Install the memory extra first: pip install -e ".[memory]"') from exc
+        return psycopg.connect(config.database_url, connect_timeout=config.connect_timeout_seconds)
 
-    return psycopg.connect(config.database_url)
+
+def initialize_memory_database(*, config: MemoryConfig | None = None) -> None:
+    """Initialize the PostgreSQL schema required by the memory store."""
+    from agent_long_memory.schema import SCHEMA_SQL
+
+    resolved = config or load_memory_config()
+    conn = connect_memory_db(resolved)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(SCHEMA_SQL)
+        conn.commit()
+    finally:
+        release_connection(conn, resolved)
+
+
+def release_connection(conn, config: MemoryConfig):
+    """释放数据库连接回连接池"""
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.putconn(conn)
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    else:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def ensure_memory_project(scope: ProjectScope, *, config: MemoryConfig) -> MemoryProject:
+    logger.debug(f"Ensuring memory project: {scope.name}")
     query = """
         INSERT INTO memory_projects (name, root_path, git_remote)
         VALUES (%s, %s, %s)
@@ -168,13 +267,17 @@ def ensure_memory_project(scope: ProjectScope, *, config: MemoryConfig) -> Memor
                       updated_at = now()
         RETURNING id, name, root_path, git_remote
     """
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, (scope.name, str(scope.root_path), scope.git_remote))
             row = cursor.fetchone()
         conn.commit()
+    finally:
+        release_connection(conn, config)
     if not row:
         raise MemoryDbError("ensure_memory_project did not return a project")
+    logger.debug(f"Ensured memory project: {row[0]}")
     return MemoryProject(id=str(row[0]), name=row[1], root_path=row[2], git_remote=row[3])
 
 
@@ -185,6 +288,7 @@ def create_memory_record(
     config: MemoryConfig,
 ) -> MemoryRecord:
     _validate_record_input(record)
+    logger.debug(f"Creating memory record: type={record.memory_type}, title={record.title[:50]}")
     query = """
         INSERT INTO memory_records (
             project_id,
@@ -223,19 +327,98 @@ def create_memory_record(
         record.importance,
         record.confidence,
     )
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, params)
             row = cursor.fetchone()
         conn.commit()
+    finally:
+        release_connection(conn, config)
     if not row:
         raise MemoryDbError("create_memory_record did not return a record")
+    logger.debug(f"Created memory record: {row[0]}")
     return _record_from_row(row)
 
 
+def create_memory_records_batch(
+    project: MemoryProject,
+    records: list[CreateMemoryRecordInput],
+    *,
+    config: MemoryConfig,
+) -> list[MemoryRecord]:
+    """批量创建记忆记录"""
+    if not records:
+        return []
+
+    for record in records:
+        _validate_record_input(record)
+
+    logger.debug(f"Batch creating {len(records)} memory records")
+
+    query = """
+        INSERT INTO memory_records (
+            project_id,
+            memory_type,
+            title,
+            content,
+            source_type,
+            source_ref,
+            module_path,
+            tags,
+            importance,
+            confidence
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id,
+                  project_id,
+                  memory_type,
+                  title,
+                  content,
+                  source_type,
+                  source_ref,
+                  module_path,
+                  tags,
+                  importance,
+                  confidence
+    """
+
+    results = []
+    conn = connect_memory_db(config)
+    try:
+        with conn.cursor() as cursor:
+            for record in records:
+                params = (
+                    project.id,
+                    record.memory_type,
+                    record.title,
+                    record.content,
+                    record.source_type,
+                    record.source_ref,
+                    record.module_path,
+                    record.tags or [],
+                    record.importance,
+                    record.confidence,
+                )
+                cursor.execute(query, params)
+                row = cursor.fetchone()
+                if row:
+                    results.append(_record_from_row(row))
+        conn.commit()
+    finally:
+        release_connection(conn, config)
+
+    logger.debug(f"Batch created {len(results)} memory records")
+    return results
+
+
 def get_memory_record(record_id: str, *, project_id: str, config: MemoryConfig) -> MemoryRecord | None:
+    if not str(record_id).strip():
+        raise MemoryValidationError("record_id must be non-empty")
     if not str(project_id).strip():
-        raise ValueError("project_id must be non-empty")
+        raise MemoryValidationError("project_id must be non-empty")
+
+    logger.debug(f"Getting memory record: {record_id}")
     query = """
         SELECT id,
                project_id,
@@ -252,10 +435,13 @@ def get_memory_record(record_id: str, *, project_id: str, config: MemoryConfig) 
         WHERE id = %s
           AND project_id = %s
     """
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, (record_id, project_id))
             row = cursor.fetchone()
+    finally:
+        release_connection(conn, config)
     if not row:
         return None
     return _record_from_row(row)
@@ -295,10 +481,13 @@ def list_memory_records(
         ORDER BY created_at DESC
         LIMIT %s
     """
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
+    finally:
+        release_connection(conn, config)
     return [_record_from_row(row) for row in rows]
 
 
@@ -310,6 +499,7 @@ def upsert_memory_embedding(
     config: MemoryConfig,
 ) -> MemoryEmbedding:
     _validate_embedding_input(record_id, embedding_model=embedding_model, embedding=embedding)
+    logger.debug(f"Upserting memory embedding: record={record_id}, model={embedding_model}")
     query = """
         INSERT INTO memory_embeddings (record_id, embedding_model, embedding)
         VALUES (%s, %s, %s::vector)
@@ -318,14 +508,59 @@ def upsert_memory_embedding(
         RETURNING id, record_id, embedding_model, embedding, created_at
     """
     embedding_literal = _format_pgvector_literal(embedding)
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, (record_id, embedding_model, embedding_literal))
             row = cursor.fetchone()
         conn.commit()
+    finally:
+        release_connection(conn, config)
     if not row:
         raise MemoryDbError("upsert_memory_embedding did not return an embedding")
     return _embedding_from_row(row)
+
+
+def upsert_memory_embeddings_batch(
+    embeddings: list[tuple[str, str, list[float]]],
+    *,
+    config: MemoryConfig,
+) -> list[MemoryEmbedding]:
+    """批量upsert嵌入向量
+
+    Args:
+        embeddings: [(record_id, embedding_model, embedding), ...]
+    """
+    if not embeddings:
+        return []
+
+    logger.debug(f"Batch upserting {len(embeddings)} memory embeddings")
+
+    query = """
+        INSERT INTO memory_embeddings (record_id, embedding_model, embedding)
+        VALUES (%s, %s, %s::vector)
+        ON CONFLICT (record_id, embedding_model) DO UPDATE
+        SET embedding = EXCLUDED.embedding
+        RETURNING id, record_id, embedding_model, embedding, created_at
+    """
+
+    results = []
+    conn = connect_memory_db(config)
+    try:
+        with conn.cursor() as cursor:
+            for record_id, embedding_model, embedding in embeddings:
+                _validate_embedding_input(record_id, embedding_model=embedding_model, embedding=embedding)
+                embedding_literal = _format_pgvector_literal(embedding)
+                cursor.execute(query, (record_id, embedding_model, embedding_literal))
+                row = cursor.fetchone()
+                if row:
+                    results.append(_embedding_from_row(row))
+        conn.commit()
+    finally:
+        release_connection(conn, config)
+
+    logger.debug(f"Batch upserted {len(results)} memory embeddings")
+    return results
 
 
 def get_memory_embedding(
@@ -336,11 +571,13 @@ def get_memory_embedding(
     config: MemoryConfig,
 ) -> MemoryEmbedding | None:
     if not str(record_id).strip():
-        raise ValueError("record_id must be non-empty")
+        raise MemoryValidationError("record_id must be non-empty")
     if not embedding_model.strip():
-        raise ValueError("embedding_model must be non-empty")
+        raise MemoryValidationError("embedding_model must be non-empty")
     if not str(project_id).strip():
-        raise ValueError("project_id must be non-empty")
+        raise MemoryValidationError("project_id must be non-empty")
+
+    logger.debug(f"Getting memory embedding: record={record_id}, model={embedding_model}")
     query = """
         SELECT e.id, e.record_id, e.embedding_model, e.embedding, e.created_at
         FROM memory_embeddings e
@@ -349,10 +586,13 @@ def get_memory_embedding(
           AND e.embedding_model = %s
           AND r.project_id = %s
     """
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, (record_id, embedding_model, project_id))
             row = cursor.fetchone()
+    finally:
+        release_connection(conn, config)
     if not row:
         return None
     return _embedding_from_row(row)
@@ -368,13 +608,13 @@ def search_memory_records_by_embedding(
     config: MemoryConfig,
 ) -> list[MemorySearchResult]:
     if not project.id:
-        raise ValueError("project.id must be non-empty")
+        raise MemoryValidationError("project.id must be non-empty")
     if not query_embedding:
-        raise ValueError("query_embedding must be non-empty")
+        raise MemoryValidationError("query_embedding must be non-empty")
     if len(query_embedding) != 384:
-        raise ValueError("query_embedding must contain exactly 384 values")
+        raise MemoryValidationError("query_embedding must contain exactly 384 values")
     if not embedding_model.strip():
-        raise ValueError("embedding_model must be non-empty")
+        raise MemoryValidationError("embedding_model must be non-empty")
 
     resolved_limit = min(max(limit, 1), 20)
     query_vector = _format_pgvector_literal(query_embedding)
@@ -409,10 +649,13 @@ def search_memory_records_by_embedding(
         ORDER BY e.embedding <=> %s::vector
         LIMIT %s
     """
-    with connect_memory_db(config) as conn:
+    conn = connect_memory_db(config)
+    try:
         with conn.cursor() as cursor:
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
+    finally:
+        release_connection(conn, config)
     return [
         MemorySearchResult(
             record=_record_from_row(row),
@@ -425,26 +668,26 @@ def search_memory_records_by_embedding(
 
 def _validate_record_input(record: CreateMemoryRecordInput) -> None:
     if not record.memory_type.strip():
-        raise ValueError("memory_type must be non-empty")
+        raise MemoryValidationError("memory_type must be non-empty")
     if not record.title.strip():
-        raise ValueError("title must be non-empty")
+        raise MemoryValidationError("title must be non-empty")
     if not record.content.strip():
-        raise ValueError("content must be non-empty")
+        raise MemoryValidationError("content must be non-empty")
     if not 0 <= record.importance <= 1:
-        raise ValueError("importance must be between 0 and 1")
+        raise MemoryValidationError("importance must be between 0 and 1")
     if not 0 <= record.confidence <= 1:
-        raise ValueError("confidence must be between 0 and 1")
+        raise MemoryValidationError("confidence must be between 0 and 1")
 
 
 def _validate_embedding_input(record_id: str, *, embedding_model: str, embedding: list[float]) -> None:
     if not str(record_id).strip():
-        raise ValueError("record_id must be non-empty")
+        raise MemoryValidationError("record_id must be non-empty")
     if not embedding_model.strip():
-        raise ValueError("embedding_model must be non-empty")
+        raise MemoryValidationError("embedding_model must be non-empty")
     if not embedding:
-        raise ValueError("embedding must be non-empty")
+        raise MemoryValidationError("embedding must be non-empty")
     if len(embedding) != 384:
-        raise ValueError("embedding must contain exactly 384 values")
+        raise MemoryValidationError("embedding must contain exactly 384 values")
 
 
 def _format_pgvector_literal(embedding: list[float]) -> str:
@@ -488,4 +731,3 @@ def _coerce_embedding(value: Any) -> list[float]:
             return []
         return [float(part.strip()) for part in stripped.split(",")]
     return [float(part) for part in value]
-
