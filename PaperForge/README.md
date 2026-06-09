@@ -462,7 +462,7 @@ If you haven't set any API key yet, follow the "Step 1: Set Environment Variable
     │       ├── summary.md   # AI-generated summary
     │       ├── qa.md        # AI-generated Q&A
     │       ├── glossary.md  # AI-generated glossary
-    │       ├── translated.md # Translated content (if enabled)
+    │       ├── paper.zh.md  # Chinese translation (if enabled)
     │       └── figures/     # Extracted figures
     └── 2023/
         └── another-paper/

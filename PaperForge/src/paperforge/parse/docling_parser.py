@@ -57,11 +57,20 @@ def parse_with_docling(
             }
         )
 
+        # Track warnings during parsing
+        parse_warnings = []
+
         result = converter.convert(str(pdf_path))
         doc = result.document
 
         # Export to markdown
         markdown = doc.export_to_markdown()
+
+        # Check for partial extraction indicators
+        if not markdown.strip():
+            parse_warnings.append("empty markdown output")
+        elif len(markdown.strip()) < 200:
+            parse_warnings.append(f"very short output ({len(markdown.strip())} chars)")
 
         # Extract figures
         figures: Dict[str, Path] = {}
@@ -102,8 +111,10 @@ def parse_with_docling(
                                     image.to_pil().save(str(fig_path))
                                 figures[fig_name] = fig_path
                         except Exception as e:
+                            parse_warnings.append(f"figure {i}: {e}")
                             logger.debug(f"Failed to extract picture {i}: {e}")
             except Exception as e:
+                parse_warnings.append(f"figure extraction: {e}")
                 logger.warning(f"Failed to extract figures: {e}")
 
         # Extract tables
@@ -113,14 +124,25 @@ def parse_with_docling(
                 for table in doc.tables:
                     tables.append(table.export_to_markdown())
             except Exception as e:
+                parse_warnings.append(f"table extraction: {e}")
                 logger.warning("Table extraction failed: %s", e)
+
+        # Determine quality based on completeness
+        if parse_warnings:
+            # Had errors/warnings during parsing
+            if markdown.strip() and len(markdown.strip()) > 500:
+                quality = "medium"  # Got content but with issues
+            else:
+                quality = "low"     # Minimal content with errors
+        else:
+            quality = "high"        # Clean parse
 
         return ParseResult(
             markdown=markdown,
             figures=figures,
             tables=tables,
             parser="docling",
-            quality="high" if markdown.strip() else "low",
+            quality=quality,
         )
 
     except Exception as e:

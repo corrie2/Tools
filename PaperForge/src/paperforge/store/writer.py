@@ -8,14 +8,19 @@ from typing import Dict, List, Optional
 
 from jinja2 import Environment, FileSystemLoader
 
+# Module-level singleton for Jinja2 Environment (Item 9)
+_template_dir = Path(__file__).parent.parent / "templates"
+_env = Environment(
+    loader=FileSystemLoader(str(_template_dir)),
+    keep_trailing_newline=True,
+)
 
-def _get_template_env() -> Environment:
-    """Get Jinja2 environment with templates from the package."""
-    template_dir = Path(__file__).parent.parent / "templates"
-    return Environment(
-        loader=FileSystemLoader(str(template_dir)),
-        keep_trailing_newline=True,
-    )
+
+def _paper_dir(vault: Path, year: int | None, slug: str) -> Path:
+    """Return vault/papers/{year or 'unknown'}/{slug}, creating it if needed."""
+    d = vault / "papers" / str(year or "unknown") / slug
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def write_paper_md(
@@ -37,8 +42,7 @@ def write_paper_md(
     Returns:
         Path to the paper directory.
     """
-    papers_dir = vault / "papers" / str(year or "unknown") / slug
-    papers_dir.mkdir(parents=True, exist_ok=True)
+    papers_dir = _paper_dir(vault, year, slug)
 
     # Write paper.md
     paper_md_path = papers_dir / "paper.md"
@@ -82,8 +86,7 @@ def write_index_md(
     Returns:
         Path to index.md.
     """
-    env = _get_template_env()
-    template = env.get_template("index.md.j2")
+    template = _env.get_template("index.md.j2")
 
     authors = paper.get("authors", [])
     if isinstance(authors, str):
@@ -113,9 +116,8 @@ def write_index_md(
         pending_refs=pending_refs or [],
     )
 
-    paper_dir = vault / "papers" / str(year or "unknown") / slug
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    index_path = paper_dir / "index.md"
+    paper_path = _paper_dir(vault, year, slug)
+    index_path = paper_path / "index.md"
     index_path.write_text(content, encoding="utf-8")
     return index_path
 
@@ -139,8 +141,7 @@ def write_summary_md(
     Returns:
         Path to summary.md.
     """
-    env = _get_template_env()
-    template = env.get_template("summary.md.j2")
+    template = _env.get_template("summary.md.j2")
 
     content = template.render(
         title=title,
@@ -153,9 +154,8 @@ def write_summary_md(
         relation_to_prior_work=summary_result.relation_to_prior_work,
     )
 
-    paper_dir = vault / "papers" / str(year or "unknown") / slug
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = paper_dir / "summary.md"
+    paper_path = _paper_dir(vault, year, slug)
+    summary_path = paper_path / "summary.md"
     summary_path.write_text(content, encoding="utf-8")
     return summary_path
 
@@ -179,17 +179,15 @@ def write_qa_md(
     Returns:
         Path to qa.md.
     """
-    env = _get_template_env()
-    template = env.get_template("qa.md.j2")
+    template = _env.get_template("qa.md.j2")
 
     content = template.render(
         title=title,
         questions=[{"question": q.question, "answer": q.answer} for q in qa_result.questions],
     )
 
-    paper_dir = vault / "papers" / str(year or "unknown") / slug
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    qa_path = paper_dir / "qa.md"
+    paper_path = _paper_dir(vault, year, slug)
+    qa_path = paper_path / "qa.md"
     qa_path.write_text(content, encoding="utf-8")
     return qa_path
 
@@ -213,8 +211,7 @@ def write_glossary_md(
     Returns:
         Path to glossary.md.
     """
-    env = _get_template_env()
-    template = env.get_template("glossary.md.j2")
+    template = _env.get_template("glossary.md.j2")
 
     content = template.render(
         title=title,
@@ -229,9 +226,8 @@ def write_glossary_md(
         ],
     )
 
-    paper_dir = vault / "papers" / str(year or "unknown") / slug
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    glossary_path = paper_dir / "glossary.md"
+    paper_path = _paper_dir(vault, year, slug)
+    glossary_path = paper_path / "glossary.md"
     glossary_path.write_text(content, encoding="utf-8")
     return glossary_path
 
@@ -251,11 +247,10 @@ def write_translate_md(
         translated_text: Translated markdown text.
 
     Returns:
-        Path to translated.md.
+        Path to paper.zh.md.
     """
-    paper_dir = vault / "papers" / str(year or "unknown") / slug
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    translate_path = paper_dir / "translated.md"
+    paper_path = _paper_dir(vault, year, slug)
+    translate_path = paper_path / "paper.zh.md"
     translate_path.write_text(translated_text, encoding="utf-8")
     return translate_path
 
@@ -270,8 +265,7 @@ def write_papers_index(vault: Path, papers: List[dict]) -> Path:
     Returns:
         Path to papers/index.md.
     """
-    env = _get_template_env()
-    template = env.get_template("papers_index.md.j2")
+    template = _env.get_template("papers_index.md.j2")
 
     # Group papers by year
     by_year: Dict[str, List[dict]] = {}

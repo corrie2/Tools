@@ -14,9 +14,31 @@ import yaml
 
 from paperforge.config import load_config
 from paperforge.store import db
-from paperforge.store.writer import (
-    write_summary_md, write_qa_md, write_glossary_md, write_translate_md,
-)
+
+try:
+    from rapidfuzz import fuzz as _fuzz
+except ImportError:
+    _fuzz = None
+
+
+def _get_conn_and_paper(vault: Path, slug: str, exit_on_fail: bool = True):
+    """Load config, open DB, and look up a paper by slug.
+
+    Returns (conn, paper) or calls sys.exit(1) if not found.
+    """
+    config = load_config(vault)
+    if not config.db_path.exists():
+        click.echo("Database does not exist.")
+        sys.exit(1)
+    conn = db.init_db(config.db_path)
+    paper = db.get_paper_by_slug(conn, slug)
+    if not paper:
+        click.echo(f"Paper not found: {slug}")
+        conn.close()
+        if exit_on_fail:
+            sys.exit(1)
+        return conn, None
+    return conn, paper
 
 
 @click.group()
@@ -105,43 +127,23 @@ def doctor(vault: Path, fix: bool):
     else:
         checks.append(("SQLite schema", False, "database not found"))
 
-    # 5. Docling installed
-    try:
-        import docling
-        checks.append(("Docling", True, "installed"))
-    except ImportError:
-        checks.append(("Docling", False, "not installed (pip install docling)"))
-
-    # 6. PyMuPDF installed
-    try:
-        import fitz
-        checks.append(("PyMuPDF", True, "installed"))
-    except ImportError:
-        checks.append(("PyMuPDF", False, "not installed (pip install pymupdf)"))
-
-    # 7. pdfplumber installed
-    try:
-        import pdfplumber
-        checks.append(("pdfplumber", True, "installed"))
-    except ImportError:
-        checks.append(("pdfplumber", False, "not installed (pip install pdfplumber)"))
-
-    # 8. langdetect installed
-    try:
-        import langdetect
-        checks.append(("langdetect", True, "installed"))
-    except ImportError:
-        checks.append(("langdetect", False, "not installed (pip install langdetect)"))
-
-    # 9. rapidfuzz installed
-    try:
-        import rapidfuzz
-        checks.append(("rapidfuzz", True, "installed"))
-    except ImportError:
-        checks.append(("rapidfuzz", False, "not installed (pip install rapidfuzz)"))
+    # 5-9. Check optional dependencies
+    _OPTIONAL_DEPS = [
+        ("Docling", "docling", "docling"),
+        ("PyMuPDF", "fitz", "pymupdf"),
+        ("pdfplumber", "pdfplumber", "pdfplumber"),
+        ("langdetect", "langdetect", "langdetect"),
+        ("rapidfuzz", "rapidfuzz", "rapidfuzz"),
+    ]
+    for name, import_name, pip_name in _OPTIONAL_DEPS:
+        try:
+            __import__(import_name)
+            checks.append((name, True, "installed"))
+        except ImportError:
+            checks.append((name, False, f"not installed (pip install {pip_name})"))
 
     # 10. Env vars — detect all available providers
-    from paperforge.config import detect_providers, KNOWN_PROVIDERS
+    from paperforge.config import detect_providers
     detected = detect_providers()
     if detected:
         for provider, key_env, url_env, model, base_url in detected:
@@ -336,17 +338,8 @@ def list_papers(vault: Path, year: int | None, status_filter: str | None, fmt: s
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
 def info(slug: str, vault: Path):
     """Show details for a specific paper."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        return
-
-    conn = db.init_db(config.db_path)
-    paper = db.get_paper_by_slug(conn, slug)
-
+    conn, paper = _get_conn_and_paper(vault, slug, exit_on_fail=False)
     if not paper:
-        click.echo(f"Paper not found: {slug}")
-        conn.close()
         return
 
     paper_id = paper["id"]
@@ -399,7 +392,7 @@ def info(slug: str, vault: Path):
     # File paths
     paper_dir = vault / (paper.get("paper_dir") or "")
     click.echo(f"\nFiles:")
-    for fname in ["paper.md", "index.md", "summary.md", "qa.md", "glossary.md", "translated.md"]:
+    for fname in ["paper.md", "index.md", "summary.md", "qa.md", "glossary.md", "paper.zh.md"]:
         fpath = paper_dir / fname
         exists = fpath.exists()
         icon = click.style("OK", fg="green") if exists else click.style("--", fg="yellow")
@@ -423,17 +416,10 @@ def info(slug: str, vault: Path):
               help="Translation mode (only for --type translate)")
 def regenerate(slug: str, vault: Path, task_type: str, translate: str):
     """Regenerate a specific LLM output for a paper."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        sys.exit(1)
+    from paperforge.pipeline import resolve_llm_task
 
-    conn = db.init_db(config.db_path)
-    paper = db.get_paper_by_slug(conn, slug)
-    if not paper:
-        click.echo(f"Paper not found: {slug}")
-        conn.close()
-        sys.exit(1)
+    config = load_config(vault)
+    conn, paper = _get_conn_and_paper(vault, slug)
 
     # Read paper.md
     paper_dir = vault / (paper.get("paper_dir") or "")
@@ -461,23 +447,14 @@ def regenerate(slug: str, vault: Path, task_type: str, translate: str):
     db.update_task_status(conn, task_id, "running")
 
     try:
-        if task_type == "summary":
-            from paperforge.generate.summarizer import generate_summary
-            result = generate_summary(paper_text, llm_client)
-            path = write_summary_md(vault, year, slug, title, result)
-        elif task_type == "qa":
-            from paperforge.generate.qa_generator import generate_qa
-            result = generate_qa(paper_text, llm_client)
-            path = write_qa_md(vault, year, slug, title, result)
-        elif task_type == "glossary":
-            from paperforge.generate.glossary import generate_glossary
-            result = generate_glossary(paper_text, llm_client)
-            path = write_glossary_md(vault, year, slug, title, result)
-        elif task_type == "translate":
-            from paperforge.generate.translator import translate_paper
-            result = translate_paper(paper_text, llm_client, mode=translate,
-                                     chunk_size=config.translation.chunk_size)
-            path = write_translate_md(vault, year, slug, result)
+        gen_fn, write_fn = resolve_llm_task(task_type)
+        if task_type == "translate":
+            result = gen_fn(paper_text, llm_client, mode=translate,
+                            chunk_size=config.translation.chunk_size)
+            path = write_fn(vault, year, slug, result)
+        else:
+            result = gen_fn(paper_text, llm_client)
+            path = write_fn(vault, year, slug, title, result)
 
         db.update_task_status(conn, task_id, "completed", output_path=str(path))
         click.echo(click.style(f"  OK: {task_type} written to {path}", fg="green"))
@@ -495,16 +472,8 @@ def regenerate(slug: str, vault: Path, task_type: str, translate: str):
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
 def status(slug: str, vault: Path):
     """Show task statuses for a paper."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        return
-
-    conn = db.init_db(config.db_path)
-    paper = db.get_paper_by_slug(conn, slug)
+    conn, paper = _get_conn_and_paper(vault, slug, exit_on_fail=False)
     if not paper:
-        click.echo(f"Paper not found: {slug}")
-        conn.close()
         return
 
     click.echo(f"Paper: {paper.get('title', '')}")
@@ -539,17 +508,10 @@ def status(slug: str, vault: Path):
               help="Translation mode for retry")
 def retry(slug: str, vault: Path, translate: str):
     """Retry all failed LLM tasks for a paper."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        sys.exit(1)
+    from paperforge.pipeline import resolve_llm_task
 
-    conn = db.init_db(config.db_path)
-    paper = db.get_paper_by_slug(conn, slug)
-    if not paper:
-        click.echo(f"Paper not found: {slug}")
-        conn.close()
-        sys.exit(1)
+    config = load_config(vault)
+    conn, paper = _get_conn_and_paper(vault, slug)
 
     tasks = db.get_tasks_for_paper(conn, paper["id"])
     failed_tasks = [t for t in tasks if t["status"] == "failed"]
@@ -586,32 +548,18 @@ def retry(slug: str, vault: Path, translate: str):
         task_type = task["task_type"]
         click.echo(f"  Retrying {task_type}...")
 
-        # Insert new task (don't reuse old one)
         new_task_id = db.insert_task(conn, paper["id"], task_type)
         db.update_task_status(conn, new_task_id, "running")
 
         try:
-            if task_type == "summary":
-                from paperforge.generate.summarizer import generate_summary
-                result = generate_summary(paper_text, llm_client)
-                path = write_summary_md(vault, year, slug, title, result)
-            elif task_type == "qa":
-                from paperforge.generate.qa_generator import generate_qa
-                result = generate_qa(paper_text, llm_client)
-                path = write_qa_md(vault, year, slug, title, result)
-            elif task_type == "glossary":
-                from paperforge.generate.glossary import generate_glossary
-                result = generate_glossary(paper_text, llm_client)
-                path = write_glossary_md(vault, year, slug, title, result)
-            elif task_type == "translate":
-                from paperforge.generate.translator import translate_paper
-                result = translate_paper(paper_text, llm_client, mode=translate,
-                                         chunk_size=config.translation.chunk_size)
-                path = write_translate_md(vault, year, slug, result)
+            gen_fn, write_fn = resolve_llm_task(task_type)
+            if task_type == "translate":
+                result = gen_fn(paper_text, llm_client, mode=translate,
+                                chunk_size=config.translation.chunk_size)
+                path = write_fn(vault, year, slug, result)
             else:
-                click.echo(f"    Unknown task type: {task_type}")
-                db.update_task_status(conn, new_task_id, "failed", error="Unknown task type")
-                continue
+                result = gen_fn(paper_text, llm_client)
+                path = write_fn(vault, year, slug, title, result)
 
             db.update_task_status(conn, new_task_id, "completed", output_path=str(path))
             click.echo(click.style(f"    OK: {task_type}", fg="green"))
@@ -652,17 +600,13 @@ def relink(vault: Path):
     click.echo(f"Re-linking {len(papers)} papers...")
 
     from paperforge.link.references import find_references_section, extract_raw_references
-    from paperforge.link.matcher import match_reference, normalize_title
     from paperforge.link.linker import (
         generate_citation_section, update_index_md,
         update_cited_papers_index, update_citing_papers_index,
+        process_single_reference,
     )
-    from datetime import datetime, timezone
-    from uuid import uuid4
-    import json as _json
 
     total_stats = {"confirmed": 0, "pending": 0, "unmatched": 0, "papers": 0}
-    now = datetime.now(timezone.utc).isoformat()
 
     for paper in papers:
         paper_id = paper["id"]
@@ -699,50 +643,17 @@ def relink(vault: Path):
 
         # Match each reference
         for idx, raw in enumerate(raw_refs):
-            # Insert raw reference
-            ref_id = uuid4().hex
-            norm_title_guess = normalize_title(raw[:200])
-            conn.execute(
-                """INSERT OR IGNORE INTO references_raw
-                   (id, source_paper_id, raw_text, normalized_title,
-                    sequence_num, extraction_method, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (ref_id, paper_id, raw, norm_title_guess, idx + 1, "relink", now),
-            )
-
-            # Try matching (use raw text as title guess)
-            ref_dict = {"title": raw[:200], "year": None, "doi": None}
-            result = match_reference(ref_dict, conn, config.citation)
-
-            # Insert candidate
-            candidate_id = uuid4().hex
-            conn.execute(
-                """INSERT INTO reference_candidates
-                   (id, source_paper_id, raw_reference_id, title, normalized_title,
-                    match_method, confidence, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    candidate_id, paper_id, ref_id,
-                    raw[:200], norm_title_guess,
-                    result.match_method, result.confidence, result.status,
-                    now, now,
-                ),
-            )
-
-            if result.status == "confirmed" and result.paper_id:
-                conn.execute(
-                    """INSERT OR REPLACE INTO citation_edges
-                       (source_paper_id, target_paper_id, raw_reference_id,
-                        match_method, confidence, confirmed, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (paper_id, result.paper_id, ref_id,
-                     result.match_method, result.confidence, 1, now, now),
+            try:
+                ref_dict = {"title": raw[:200], "year": None, "doi": None}
+                ref_result = process_single_reference(
+                    conn, paper_id, raw, ref_dict,
+                    config=config.citation,
+                    extraction_method="relink",
+                    sequence_num=idx + 1,
                 )
-                total_stats["confirmed"] += 1
-            elif result.status == "pending":
-                total_stats["pending"] += 1
-            else:
-                total_stats["unmatched"] += 1
+                total_stats[ref_result["status"]] = total_stats.get(ref_result["status"], 0) + 1
+            except Exception as e:
+                click.echo(f"    Warning: error processing reference {idx}: {e}")
 
         conn.commit()
 
@@ -781,20 +692,9 @@ def relink(vault: Path):
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
 def confirm_ref(source_slug: str, target_slug: str, vault: Path):
     """Confirm a pending citation reference."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        sys.exit(1)
+    conn, source = _get_conn_and_paper(vault, source_slug)
 
-    conn = db.init_db(config.db_path)
-
-    source = db.get_paper_by_slug(conn, source_slug)
     target = db.get_paper_by_slug(conn, target_slug)
-
-    if not source:
-        click.echo(f"Source paper not found: {source_slug}")
-        conn.close()
-        sys.exit(1)
     if not target:
         click.echo(f"Target paper not found: {target_slug}")
         conn.close()
@@ -812,13 +712,11 @@ def confirm_ref(source_slug: str, target_slug: str, vault: Path):
     for cand in candidates:
         cand_dict = dict(cand)
         if cand_dict.get("normalized_title") and target.get("normalized_title"):
-            try:
-                from rapidfuzz import fuzz
-            except ImportError:
+            if _fuzz is None:
                 click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
                 conn.close()
                 sys.exit(1)
-            score = fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
+            score = _fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
             if score >= 80:
                 db.update_candidate_status(conn, cand_dict["id"], "confirmed")
                 db.insert_citation_edge(
@@ -858,20 +756,9 @@ def confirm_ref(source_slug: str, target_slug: str, vault: Path):
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
 def reject_ref(source_slug: str, target_slug: str, vault: Path):
     """Reject a pending citation reference."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        sys.exit(1)
+    conn, source = _get_conn_and_paper(vault, source_slug)
 
-    conn = db.init_db(config.db_path)
-
-    source = db.get_paper_by_slug(conn, source_slug)
     target = db.get_paper_by_slug(conn, target_slug)
-
-    if not source:
-        click.echo(f"Source paper not found: {source_slug}")
-        conn.close()
-        sys.exit(1)
     if not target:
         click.echo(f"Target paper not found: {target_slug}")
         conn.close()
@@ -888,13 +775,11 @@ def reject_ref(source_slug: str, target_slug: str, vault: Path):
     for cand in candidates:
         cand_dict = dict(cand)
         if cand_dict.get("normalized_title") and target.get("normalized_title"):
-            try:
-                from rapidfuzz import fuzz
-            except ImportError:
+            if _fuzz is None:
                 click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
                 conn.close()
                 sys.exit(1)
-            score = fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
+            score = _fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
             if score >= 80:
                 db.update_candidate_status(conn, cand_dict["id"], "rejected")
                 rejected = True
@@ -929,17 +814,7 @@ def reject_ref(source_slug: str, target_slug: str, vault: Path):
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
 def remove(slug: str, vault: Path, yes: bool):
     """Remove a paper from the knowledge base."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        sys.exit(1)
-
-    conn = db.init_db(config.db_path)
-    paper = db.get_paper_by_slug(conn, slug)
-    if not paper:
-        click.echo(f"Paper not found: {slug}")
-        conn.close()
-        sys.exit(1)
+    conn, paper = _get_conn_and_paper(vault, slug)
 
     paper_id = paper["id"]
     paper_dir = vault / (paper.get("paper_dir") or "")
@@ -987,14 +862,8 @@ def remove(slug: str, vault: Path, yes: bool):
             abort=True,
         )
 
-    # 1. Delete from SQLite (in correct order for foreign keys)
-    conn.execute("DELETE FROM citation_edges WHERE source_paper_id = ? OR target_paper_id = ?",
-                 (paper_id, paper_id))
-    conn.execute("DELETE FROM reference_candidates WHERE source_paper_id = ?", (paper_id,))
-    conn.execute("DELETE FROM references_raw WHERE source_paper_id = ?", (paper_id,))
-    conn.execute("DELETE FROM paper_tasks WHERE paper_id = ?", (paper_id,))
-    conn.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
-    conn.commit()
+    # 1. Delete from SQLite
+    db.delete_paper(conn, paper_id)
 
     # 2. Delete paper directory
     if paper_dir.exists():
@@ -1074,18 +943,8 @@ def rebuild_index(vault: Path):
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
 def open(slug: str, vault: Path):
     """Open a paper's index.md in the system default application."""
-    config = load_config(vault)
-    if not config.db_path.exists():
-        click.echo("Database does not exist.")
-        sys.exit(1)
-
-    conn = db.init_db(config.db_path)
-    paper = db.get_paper_by_slug(conn, slug)
+    conn, paper = _get_conn_and_paper(vault, slug)
     conn.close()
-
-    if not paper:
-        click.echo(f"Paper not found: {slug}")
-        sys.exit(1)
 
     paper_dir = vault / (paper.get("paper_dir") or "")
     index_path = paper_dir / "index.md"
@@ -1149,7 +1008,7 @@ def export_cmd(vault: Path, fmt: str, output: Path | None):
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
 def config_cmd(vault: Path):
     """Auto-detect API keys and configure LLM provider."""
-    from paperforge.config import detect_providers, get_provider_config, create_default_config
+    from paperforge.config import detect_providers
 
     click.echo("Scanning environment for API keys...\n")
 

@@ -45,12 +45,23 @@ def normalize_title(title: str) -> str:
     - strip all punctuation
     - normalize whitespace
     """
+    if not title:
+        return ""
     text = unicodedata.normalize('NFKD', title)
     text = re.sub(r'[\u0300-\u036f]', '', text)  # strip combining marks
     text = text.lower()
     text = re.sub(r'[^\w\s]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
+
+def normalize_doi(doi: str) -> str:
+    """Normalize a DOI by stripping common prefixes and whitespace."""
+    if not doi:
+        return ""
+    doi = doi.strip().lower()
+    doi = re.sub(r"^(https?://doi\.org/|https?://dx\.doi\.org/|doi:)\s*", "", doi, flags=re.IGNORECASE)
+    return doi.strip()
 
 
 class Paper(BaseModel):

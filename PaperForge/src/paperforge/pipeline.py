@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,12 +11,39 @@ from paperforge.config import Config, load_config
 from paperforge.models.paper import Paper, generate_slug, normalize_title
 from paperforge.parse.metadata import extract_metadata, compute_pdf_sha256
 from paperforge.store import db
-from paperforge.store.writer import (
-    write_index_md, write_papers_index, write_paper_md,
-    write_summary_md, write_qa_md, write_glossary_md, write_translate_md,
-)
+from paperforge.store.writer import write_index_md, write_papers_index, write_paper_md
 
 logger = logging.getLogger(__name__)
+
+
+# --- LLM Task Registry ---
+# Maps task_type -> (generate_module, generate_func, write_module, write_func)
+# Used by _run_llm_steps, cli.regenerate, and cli.retry for dedup.
+_LLM_TASK_MAP = {
+    "summary": ("paperforge.generate.summarizer", "generate_summary",
+                "paperforge.store.writer", "write_summary_md"),
+    "qa": ("paperforge.generate.qa_generator", "generate_qa",
+           "paperforge.store.writer", "write_qa_md"),
+    "glossary": ("paperforge.generate.glossary", "generate_glossary",
+                 "paperforge.store.writer", "write_glossary_md"),
+    "translate": ("paperforge.generate.translator", "translate_paper",
+                  "paperforge.store.writer", "write_translate_md"),
+}
+
+LLM_TASK_TYPES = list(_LLM_TASK_MAP.keys())
+
+
+def resolve_llm_task(task_type: str):
+    """Resolve a task_type string to (generate_fn, write_fn) with lazy imports."""
+    import importlib
+
+    entry = _LLM_TASK_MAP.get(task_type)
+    if entry is None:
+        raise ValueError(f"Unknown LLM task type: {task_type}")
+    gen_mod, gen_func, write_mod, write_func = entry
+    generate_fn = getattr(importlib.import_module(gen_mod), gen_func)
+    write_fn = getattr(importlib.import_module(write_mod), write_func)
+    return generate_fn, write_fn
 
 
 @dataclass
@@ -172,10 +198,6 @@ def ingest(
         slug = generate_slug(title) if title else generate_slug(pdf_path.stem)
         norm_title = normalize_title(title) if title else ""
 
-        # Determine year (use "unknown" if truly unknown, never default to current year)
-        if not year:
-            year = None
-
         paper = Paper(
             slug=slug,
             title=title,
@@ -255,7 +277,7 @@ def ingest(
                     db.update_paper_status(conn, paper.id, "llm_failed")
         else:
             # Mark LLM tasks as skipped
-            for task_type in ["summary", "qa", "glossary", "translate"]:
+            for task_type in LLM_TASK_TYPES:
                 task_id = db.insert_task(conn, paper.id, task_type)
                 db.update_task_status(conn, task_id, "skipped")
 
@@ -305,10 +327,6 @@ def _run_llm_steps(
         (success_count, total_count)
     """
     from paperforge.llm.client import LLMClient
-    from paperforge.generate.summarizer import generate_summary
-    from paperforge.generate.qa_generator import generate_qa
-    from paperforge.generate.glossary import generate_glossary
-    from paperforge.generate.translator import translate_paper
 
     success = 0
     total = 0
@@ -318,73 +336,36 @@ def _run_llm_steps(
         llm_client = LLMClient(config.llm)
     except ValueError as e:
         logger.error("Cannot create LLM client: %s", e)
-        # Mark all tasks as failed
-        for task_type in ["summary", "qa", "glossary", "translate"]:
+        for task_type in LLM_TASK_TYPES:
             task_id = db.insert_task(conn, paper_id, task_type)
             db.update_task_status(conn, task_id, "failed", error=str(e))
-        return 0, 4
+        return 0, len(LLM_TASK_TYPES)
 
-    # --- Summary ---
-    total += 1
-    task_id = db.insert_task(conn, paper_id, "summary")
-    db.update_task_status(conn, task_id, "running")
-    try:
-        summary = generate_summary(paper_text, llm_client)
-        path = write_summary_md(vault, year, slug, title, summary)
-        db.update_task_status(conn, task_id, "completed", output_path=str(path))
-        success += 1
-        logger.info("Summary generated successfully")
-    except Exception as e:
-        logger.error("Summary generation failed: %s", e)
-        db.update_task_status(conn, task_id, "failed", error=str(e))
+    for task_type in LLM_TASK_TYPES:
+        total += 1
+        task_id = db.insert_task(conn, paper_id, task_type)
+        db.update_task_status(conn, task_id, "running")
 
-    # --- Q&A ---
-    total += 1
-    task_id = db.insert_task(conn, paper_id, "qa")
-    db.update_task_status(conn, task_id, "running")
-    try:
-        qa = generate_qa(paper_text, llm_client)
-        path = write_qa_md(vault, year, slug, title, qa)
-        db.update_task_status(conn, task_id, "completed", output_path=str(path))
-        success += 1
-        logger.info("Q&A generated successfully")
-    except Exception as e:
-        logger.error("Q&A generation failed: %s", e)
-        db.update_task_status(conn, task_id, "failed", error=str(e))
+        # Special handling for translate skip
+        if task_type == "translate" and translate_mode == "off":
+            db.update_task_status(conn, task_id, "skipped")
+            success += 1
+            continue
 
-    # --- Glossary ---
-    total += 1
-    task_id = db.insert_task(conn, paper_id, "glossary")
-    db.update_task_status(conn, task_id, "running")
-    try:
-        glossary = generate_glossary(paper_text, llm_client)
-        path = write_glossary_md(vault, year, slug, title, glossary)
-        db.update_task_status(conn, task_id, "completed", output_path=str(path))
-        success += 1
-        logger.info("Glossary generated successfully")
-    except Exception as e:
-        logger.error("Glossary generation failed: %s", e)
-        db.update_task_status(conn, task_id, "failed", error=str(e))
-
-    # --- Translate ---
-    total += 1
-    task_id = db.insert_task(conn, paper_id, "translate")
-    db.update_task_status(conn, task_id, "running")
-    if translate_mode == "off":
-        db.update_task_status(conn, task_id, "skipped")
-        success += 1  # Skipped counts as success
-    else:
         try:
-            translated = translate_paper(
-                paper_text, llm_client, mode=translate_mode,
-                chunk_size=config.translation.chunk_size,
-            )
-            path = write_translate_md(vault, year, slug, translated)
+            gen_fn, write_fn = resolve_llm_task(task_type)
+            if task_type == "translate":
+                result = gen_fn(paper_text, llm_client, mode=translate_mode,
+                                chunk_size=config.translation.chunk_size)
+                path = write_fn(vault, year, slug, result)
+            else:
+                result = gen_fn(paper_text, llm_client)
+                path = write_fn(vault, year, slug, title, result)
             db.update_task_status(conn, task_id, "completed", output_path=str(path))
             success += 1
-            logger.info("Translation generated successfully")
+            logger.info("%s generated successfully", task_type)
         except Exception as e:
-            logger.error("Translation failed: %s", e)
+            logger.error("%s generation failed: %s", task_type, e)
             db.update_task_status(conn, task_id, "failed", error=str(e))
 
     return success, total
@@ -414,13 +395,11 @@ def _run_reference_linking(
     Errors in reference extraction do NOT crash the pipeline.
     """
     from paperforge.link.references import find_references_section, extract_raw_references
-    from paperforge.link.matcher import match_reference, normalize_title
     from paperforge.link.linker import (
-        generate_citation_section, update_index_md,
+        generate_citation_section,
         update_cited_papers_index, update_citing_papers_index,
+        process_single_reference,
     )
-    from datetime import datetime, timezone
-    from uuid import uuid4
 
     task_id = db.insert_task(conn, paper_id, "references")
     db.update_task_status(conn, task_id, "running")
@@ -465,72 +444,17 @@ def _run_reference_linking(
 
         # 4. Match and create edges
         stats = {"confirmed": 0, "pending": 0, "unmatched": 0}
-        now = datetime.now(timezone.utc).isoformat()
 
         for idx, ref in enumerate(structured_refs):
             try:
                 raw_text = ref.get("_raw", ref.get("title", ""))
-                parsed_title = ref.get("title", "")
-                parsed_authors = ref.get("authors", [])
-                parsed_year = ref.get("year")
-                parsed_venue = ref.get("venue")
-                parsed_doi = ref.get("doi")
-                norm_title = normalize_title(parsed_title) if parsed_title else ""
-
-                # Insert raw reference
-                ref_id = uuid4().hex
-                conn.execute(
-                    """INSERT OR IGNORE INTO references_raw
-                       (id, source_paper_id, raw_text, parsed_authors, parsed_title,
-                        normalized_title, parsed_year, parsed_venue, parsed_doi,
-                        sequence_num, extraction_method, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        ref_id, paper_id, raw_text,
-                        json.dumps(parsed_authors) if parsed_authors else None,
-                        parsed_title or None, norm_title or None,
-                        parsed_year, parsed_venue, parsed_doi,
-                        idx + 1, "llm", now,
-                    ),
+                ref_result = process_single_reference(
+                    conn, paper_id, raw_text, ref,
+                    config=config.citation,
+                    extraction_method="llm",
+                    sequence_num=idx + 1,
                 )
-
-                # Match
-                result = match_reference(ref, conn, config.citation)
-
-                # Insert candidate
-                candidate_id = uuid4().hex
-                conn.execute(
-                    """INSERT INTO reference_candidates
-                       (id, source_paper_id, raw_reference_id, title, normalized_title,
-                        authors, year, venue, doi, matched_paper_id,
-                        match_method, confidence, status, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        candidate_id, paper_id, ref_id,
-                        parsed_title, norm_title,
-                        json.dumps(parsed_authors) if parsed_authors else None,
-                        parsed_year, parsed_venue, parsed_doi,
-                        result.paper_id, result.match_method,
-                        result.confidence, result.status, now, now,
-                    ),
-                )
-
-                # Create edge for confirmed
-                if result.status == "confirmed" and result.paper_id:
-                    conn.execute(
-                        """INSERT OR REPLACE INTO citation_edges
-                           (source_paper_id, target_paper_id, raw_reference_id,
-                            match_method, confidence, confirmed, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (paper_id, result.paper_id, ref_id,
-                         result.match_method, result.confidence, 1, now, now),
-                    )
-                    stats["confirmed"] += 1
-                elif result.status == "pending":
-                    stats["pending"] += 1
-                else:
-                    stats["unmatched"] += 1
-
+                stats[ref_result["status"]] = stats.get(ref_result["status"], 0) + 1
             except Exception as e:
                 logger.warning("Error processing reference %d: %s", idx, e)
 

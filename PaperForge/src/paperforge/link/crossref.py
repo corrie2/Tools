@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -83,8 +82,8 @@ def get_paper_by_doi(doi: str) -> Optional[dict]:
         return None
 
     # Clean DOI
-    doi = re.sub(r"^(https?://doi\.org/|https?://dx\.doi\.org/|doi:)\s*", "", doi, flags=re.IGNORECASE)
-    doi = doi.strip()
+    from paperforge.models.paper import normalize_doi
+    doi = normalize_doi(doi)
 
     url = f"{BASE_URL}/works/{urllib.parse.quote(doi, safe='')}"
 

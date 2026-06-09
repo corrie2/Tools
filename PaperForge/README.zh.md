@@ -390,7 +390,7 @@ translation:
     │       ├── summary.md   # AI 生成的摘要
     │       ├── qa.md        # AI 生成的问答
     │       ├── glossary.md  # AI 生成的术语表
-    │       ├── translated.md # 翻译内容（如启用）
+    │       ├── paper.zh.md   # 中文翻译（如启用）
     │       └── figures/     # 提取的图片
     └── 2023/
         └── another-paper/

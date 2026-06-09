@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Optional
+
+from paperforge.models.paper import normalize_title, normalize_doi
 
 logger = logging.getLogger(__name__)
 
@@ -18,30 +18,6 @@ class MatchResult:
     match_method: Optional[str] = None  # doi | title_fuzzy | title_exact
     confidence: float = 0.0
     status: str = "unmatched"  # confirmed | pending | unmatched
-
-
-def normalize_title(title: str) -> str:
-    """Normalize a title for comparison.
-
-    Rules:
-    - Unicode NFKD normalization
-    - Lowercase
-    - Strip all punctuation (keep alphanumeric + whitespace)
-    - Collapse whitespace
-    """
-    if not title:
-        return ""
-    # Unicode normalize
-    normalized = unicodedata.normalize("NFKD", title)
-    # Strip combining marks (accents) after NFKD decomposition
-    normalized = re.sub(r'[\u0300-\u036f]', '', normalized)
-    # Lowercase
-    normalized = normalized.lower()
-    # Remove punctuation (keep word chars and whitespace)
-    normalized = re.sub(r"[^\w\s]", "", normalized)
-    # Collapse whitespace
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
 
 
 def match_by_doi(doi: str, conn) -> Optional[str]:
@@ -57,9 +33,7 @@ def match_by_doi(doi: str, conn) -> Optional[str]:
     if not doi:
         return None
 
-    doi = doi.strip().lower()
-    # Remove common prefixes
-    doi = re.sub(r"^(https?://doi\.org/|https?://dx\.doi\.org/|doi:)\s*", "", doi, flags=re.IGNORECASE)
+    doi = normalize_doi(doi)
 
     row = conn.execute(
         "SELECT id FROM papers WHERE LOWER(doi) = ?",

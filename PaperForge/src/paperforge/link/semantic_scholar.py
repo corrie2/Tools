@@ -107,9 +107,8 @@ def get_paper_by_doi(doi: str) -> Optional[dict]:
         return None
 
     # Clean DOI
-    import re
-    doi = re.sub(r"^(https?://doi\.org/|https?://dx\.doi\.org/|doi:)\s*", "", doi, flags=re.IGNORECASE)
-    doi = doi.strip()
+    from paperforge.models.paper import normalize_doi
+    doi = normalize_doi(doi)
 
     fields = "title,authors,year,venue,externalIds,paperId"
     url = f"{BASE_URL}/paper/DOI:{doi}?fields={fields}"

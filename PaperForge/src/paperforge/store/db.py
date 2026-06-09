@@ -171,6 +171,22 @@ def _validate_columns(data: dict, table: str) -> dict:
     return {k: v for k, v in data.items() if k in valid}
 
 
+def _insert_record(conn: sqlite3.Connection, table: str, data: dict, or_ignore: bool = True, or_replace: bool = False) -> None:
+    """Insert a record into any table with column validation."""
+    data = _validate_columns(data, table)
+    cols = ", ".join(data.keys())
+    placeholders = ", ".join(["?"] * len(data))
+    if or_replace:
+        conflict = "OR REPLACE"
+    elif or_ignore:
+        conflict = "OR IGNORE"
+    else:
+        conflict = ""
+    sql = f"INSERT {conflict} INTO {table} ({cols}) VALUES ({placeholders})"
+    conn.execute(sql, list(data.values()))
+    conn.commit()
+
+
 def insert_paper(conn: sqlite3.Connection, paper: dict) -> None:
     """Insert a paper record. authors should be a list, will be JSON-serialized."""
     authors = paper.get("authors", [])
@@ -180,33 +196,33 @@ def insert_paper(conn: sqlite3.Connection, paper: dict) -> None:
     now = datetime.now(timezone.utc).isoformat()
     paper.setdefault("processed_at", now)
     paper.setdefault("updated_at", now)
+    _insert_record(conn, "papers", paper, or_ignore=False, or_replace=True)
 
-    paper = _validate_columns(paper, "papers")
-    cols = ", ".join(paper.keys())
-    placeholders = ", ".join(["?"] * len(paper))
-    sql = f"INSERT OR REPLACE INTO papers ({cols}) VALUES ({placeholders})"
-    conn.execute(sql, list(paper.values()))
-    conn.commit()
+
+def _get_paper_by(conn: sqlite3.Connection, column: str, value) -> Optional[dict]:
+    """Look up a paper by a single column value."""
+    # Validate column name to prevent SQL injection
+    allowed = {"id", "slug", "doi", "pdf_sha256"}
+    if column not in allowed:
+        raise ValueError(f"Invalid column for paper lookup: {column}")
+    row = conn.execute(f"SELECT * FROM papers WHERE {column} = ?", (value,)).fetchone()
+    return _row_to_dict(row) if row else None
 
 
 def get_paper_by_id(conn: sqlite3.Connection, paper_id: str) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
-    return _row_to_dict(row) if row else None
+    return _get_paper_by(conn, "id", paper_id)
 
 
 def get_paper_by_slug(conn: sqlite3.Connection, slug: str) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM papers WHERE slug = ?", (slug,)).fetchone()
-    return _row_to_dict(row) if row else None
+    return _get_paper_by(conn, "slug", slug)
 
 
 def get_paper_by_doi(conn: sqlite3.Connection, doi: str) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM papers WHERE doi = ?", (doi,)).fetchone()
-    return _row_to_dict(row) if row else None
+    return _get_paper_by(conn, "doi", doi)
 
 
 def get_paper_by_sha256(conn: sqlite3.Connection, sha256: str) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM papers WHERE pdf_sha256 = ?", (sha256,)).fetchone()
-    return _row_to_dict(row) if row else None
+    return _get_paper_by(conn, "pdf_sha256", sha256)
 
 
 def list_papers(conn: sqlite3.Connection) -> List[dict]:
@@ -281,12 +297,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 def insert_reference_raw(conn: sqlite3.Connection, ref: dict) -> None:
     """Insert a raw reference record."""
-    ref = _validate_columns(ref, "references_raw")
-    cols = ", ".join(ref.keys())
-    placeholders = ", ".join(["?"] * len(ref))
-    sql = f"INSERT OR IGNORE INTO references_raw ({cols}) VALUES ({placeholders})"
-    conn.execute(sql, list(ref.values()))
-    conn.commit()
+    _insert_record(conn, "references_raw", ref)
 
 
 def get_references_for_paper(conn: sqlite3.Connection, paper_id: str) -> List[dict]:
@@ -302,12 +313,7 @@ def get_references_for_paper(conn: sqlite3.Connection, paper_id: str) -> List[di
 
 def insert_reference_candidate(conn: sqlite3.Connection, candidate: dict) -> None:
     """Insert a reference candidate record."""
-    candidate = _validate_columns(candidate, "reference_candidates")
-    cols = ", ".join(candidate.keys())
-    placeholders = ", ".join(["?"] * len(candidate))
-    sql = f"INSERT INTO reference_candidates ({cols}) VALUES ({placeholders})"
-    conn.execute(sql, list(candidate.values()))
-    conn.commit()
+    _insert_record(conn, "reference_candidates", candidate, or_ignore=False)
 
 
 def get_candidates_for_paper(conn: sqlite3.Connection, paper_id: str) -> List[dict]:

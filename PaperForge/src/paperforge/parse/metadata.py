@@ -130,7 +130,7 @@ def _strip_affiliation_numbers(text: str) -> str:
     return text
 
 
-def extract_authors_from_pdf(pdf_path: Path, title: Optional[str] = None) -> list:
+def extract_authors_from_pdf(pdf_path: Path) -> list:
     """Extract authors from first page — heuristic: text block just below the title.
 
     Strips affiliation numbers and common artifacts.
@@ -190,7 +190,7 @@ def extract_metadata(pdf_path: Path, sha256: Optional[str] = None) -> dict:
     if sha256 is None:
         sha256 = compute_pdf_sha256(pdf_path)
     title = extract_title_from_pdf(pdf_path)
-    authors = extract_authors_from_pdf(pdf_path, title=title)
+    authors = extract_authors_from_pdf(pdf_path)
     doi = None
     language = "unknown"
     year = None
