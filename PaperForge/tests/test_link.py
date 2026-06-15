@@ -188,6 +188,32 @@ class TestExtractRawReferences:
         refs = extract_raw_references("")
         assert refs == []
 
+    def test_mixed_numbered_and_author_year(self):
+        """Test that author-year refs are correctly split even when numbered refs exist."""
+        ref_text = """[1] Vaswani A, Shazeer N, Parmar N, et al. Attention is All You Need. NeurIPS, 2017.
+[2] Devlin J, Chang M, Lee K, et al. BERT. NAACL, 2019.
+[3] Brown T, et al. Language Models are Few-Shot Learners. NeurIPS, 2020.
+Radford A, et al. Language Models are Unsupervised Multitask Learners. 2019.
+[5] Liu Y, et al. RoBERTa. 2019."""
+        refs = extract_raw_references(ref_text)
+        assert len(refs) == 5
+        assert "Vaswani" in refs[0]
+        assert "Devlin" in refs[1]
+        assert "Brown" in refs[2]
+        assert "Radford" in refs[3]
+        assert "Liu" in refs[4]
+
+    def test_unnumbered_author_year(self):
+        """Test author-year references without numbering."""
+        ref_text = """Vaswani A, Shazeer N, Parmar N, et al. Attention is All You Need. NeurIPS, 2017.
+Devlin J, Chang M, Lee K, et al. BERT. NAACL, 2019.
+Brown T, et al. Language Models are Few-Shot Learners. NeurIPS, 2020."""
+        refs = extract_raw_references(ref_text)
+        assert len(refs) == 3
+        assert "Vaswani" in refs[0]
+        assert "Devlin" in refs[1]
+        assert "Brown" in refs[2]
+
 
 # --- Test match_by_doi ---
 

@@ -142,15 +142,14 @@ def extract_raw_references(ref_text: str) -> List[str]:
                 is_new_ref = True
                 last_ref_num = num
 
-        elif not has_numbering:
-            # Author-year format: detect new reference start
-            if _is_author_year_start(stripped) and current:
-                # Check that accumulated text looks complete
-                joined = " ".join(current)
-                if re.search(r"(?:19|20)\d{2}", joined) or joined.rstrip().endswith("."):
-                    refs.append(joined)
-                    current = []
-                    is_new_ref = True
+        # Author-year format: detect new reference start (works for both numbered and unnumbered)
+        if not is_new_ref and _is_author_year_start(stripped) and current:
+            # Check that accumulated text looks complete
+            joined = " ".join(current)
+            if re.search(r"(?:19|20)\d{2}", joined) or joined.rstrip().endswith("."):
+                refs.append(joined)
+                current = []
+                is_new_ref = True
 
         if is_new_ref:
             current = [stripped]
