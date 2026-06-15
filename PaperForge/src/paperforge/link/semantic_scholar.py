@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.parse
@@ -12,12 +13,19 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
+S2_API_KEY = os.environ.get("S2_API_KEY") or os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or ""
+
 BASE_URL = "https://api.semanticscholar.org/graph/v1"
 
 # Rate limiting: 100 requests per 5 minutes (no API key)
 # With API key: 1 request per second
 _last_request_time = 0.0
-_min_interval = 3.0  # 3 seconds between requests (conservative for no API key)
+_min_interval = 1.0 if S2_API_KEY else 3.0
+
+if S2_API_KEY:
+    logger.info("Semantic Scholar API key detected, rate limit: 1 req/s")
+else:
+    logger.debug("No Semantic Scholar API key, using public API (3s/req)")
 
 
 def _rate_limit():
@@ -37,8 +45,12 @@ def _api_get(url: str, timeout: int = 30) -> Optional[dict]:
     """
     _rate_limit()
 
+    headers = {"Accept": "application/json"}
+    if S2_API_KEY:
+        headers["x-api-key"] = S2_API_KEY
+
     try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
@@ -47,7 +59,7 @@ def _api_get(url: str, timeout: int = 30) -> Optional[dict]:
             time.sleep(60)
             # Retry once
             try:
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except Exception as e2:
