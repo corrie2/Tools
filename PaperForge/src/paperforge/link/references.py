@@ -50,43 +50,109 @@ def find_references_section(text: str) -> Optional[str]:
     return ref_text if ref_text else None
 
 
+def _is_numbered_ref_start(line: str) -> Optional[int]:
+    """Check if a line starts a new numbered reference.
+
+    Returns the reference number if matched, None otherwise.
+
+    Handles: [1], [1] Author, 1. Author, 1 Author
+    Rejects years (1900-2099) and page numbers as false positives.
+    """
+    patterns = [
+        (r"^\[(\d+)\]", True),           # [1] or [1] Author
+        (r"^(\d+)\.\s+[A-Z(]", False),   # 1. Author  (need uppercase or paren after dot)
+        (r"^(\d+)\s+[A-Z][a-z]", False), # 1 Author   (need capitalized word)
+    ]
+    for pattern, bracket_form in patterns:
+        m = re.match(pattern, line)
+        if m:
+            num = int(m.group(1))
+            # Reject years and page numbers
+            if 1900 <= num <= 2099:
+                continue
+            if num > 500:
+                continue
+            return num
+    return None
+
+
+def _is_author_year_start(line: str) -> bool:
+    """Check if a line starts a new author-year reference (no numbering).
+
+    Patterns: Author, A. / Author A, / Author et al. / Authors and ...
+    """
+    return bool(re.match(
+        r"^[A-Z][a-z]+(?:\s+(?:et\s+al|[A-Z]\b|and\b|de\b|van\b|von\b|le\b|la\b))",
+        line,
+    ))
+
+
 def extract_raw_references(ref_text: str) -> List[str]:
     """Split the references section text into individual reference strings.
 
     Supports:
-    - Numbered references: [1], [2] or 1., 2. or [1] Author...
-    - Plain lines (one reference per line)
-    - Consecutive lines that belong to the same reference (wrapped lines)
+    - Numbered references: [1], [2] or 1., 2. or 1 Author...
+    - Author-year references: Author, A. Title. (no numbering)
+    - Multi-line references (wrapped lines)
+    - Rejects years/page numbers as false reference starts
     """
     lines = ref_text.strip().split("\n")
     refs: List[str] = []
     current: List[str] = []
-
-    # Patterns for a new reference entry
-    number_patterns = [
-        r"^\[(\d+)\]",          # [1] Author...
-        r"^(\d+)\.\s",          # 1. Author...
-        r"^\[(\d+)\]\s",        # [1] Author...
-        r"^(\d+)\s+[A-Z]",      # 1 Author... (common in some formats)
-    ]
+    last_ref_num: int = 0  # Track expected next reference number
+    has_numbering: Optional[bool] = None  # None = not yet determined
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
-            # Blank line might separate references
+            # Blank line: soft separator — only flush if it looks like a boundary
+            if current:
+                joined = " ".join(current)
+                # Flush if the accumulated text ends like a complete reference
+                if re.search(r"(?:19|20)\d{2}[a-z.)]?\s*$", joined) or \
+                   joined.rstrip().endswith("."):
+                    refs.append(joined)
+                    current = []
+            continue
+
+        num = _is_numbered_ref_start(stripped)
+
+        if has_numbering is None:
+            # First line: determine format
+            if num is not None:
+                has_numbering = True
+                last_ref_num = num
+            else:
+                has_numbering = False
+
+        is_new_ref = False
+
+        if has_numbering and num is not None:
             if current:
                 refs.append(" ".join(current))
                 current = []
-            continue
-
-        is_new_ref = False
-        for pattern in number_patterns:
-            if re.match(pattern, stripped):
                 is_new_ref = True
-                break
+            elif num == last_ref_num + 1 or (not refs and num == 1):
+                is_new_ref = True
+                last_ref_num = num
+            elif num <= last_ref_num:
+                # Number went backwards or repeated — likely continuation text
+                is_new_ref = False
+            else:
+                is_new_ref = True
+                last_ref_num = num
 
-        if is_new_ref and current:
-            refs.append(" ".join(current))
+        elif not has_numbering:
+            # Author-year format: detect new reference start
+            if _is_author_year_start(stripped) and current:
+                # Check that accumulated text looks complete
+                joined = " ".join(current)
+                if re.search(r"(?:19|20)\d{2}", joined) or joined.rstrip().endswith("."):
+                    refs.append(joined)
+                    current = []
+                    is_new_ref = True
+
+        if is_new_ref:
             current = [stripped]
         else:
             current.append(stripped)
@@ -98,7 +164,6 @@ def extract_raw_references(ref_text: str) -> List[str]:
     cleaned: List[str] = []
     for ref in refs:
         ref = ref.strip()
-        # Remove leading [N] or N.
         ref = re.sub(r"^\[\d+\]\s*", "", ref)
         ref = re.sub(r"^\d+\.\s*", "", ref)
         if ref:
