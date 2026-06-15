@@ -218,6 +218,18 @@ translation:
 
 任何支持 OpenAI 兼容 `/v1/chat/completions` 接口的 provider 都可以使用。
 
+### Semantic Scholar API Key（可选）
+
+PaperForge 使用 Semantic Scholar 丰富引用元数据。默认使用公共 API（每次请求间隔 3 秒）。如需更快的引用匹配，可设置 API key：
+
+```bash
+export S2_API_KEY="your-key"
+```
+
+申请地址：https://www.semanticscholar.org/product/api#api-key
+
+有 key：1 请求/秒；无 key：3 秒/请求。
+
 ## 输出结构
 
 ```

@@ -218,6 +218,18 @@ translation:
 
 Any provider with an OpenAI-compatible `/v1/chat/completions` endpoint works.
 
+### Semantic Scholar API Key (Optional)
+
+PaperForge uses Semantic Scholar to enrich citation metadata. By default it uses the public API (3s between requests). For faster citation matching, set an API key:
+
+```bash
+export S2_API_KEY="your-key"
+```
+
+Get a key at https://www.semanticscholar.org/product/api#api-key
+
+With a key: 1 request/second (vs 3s/req without).
+
 ## Output Structure
 
 ```
