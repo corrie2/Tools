@@ -18,6 +18,7 @@ REF_HEADERS = [
     r"^Bibliography\s*$",
     r"^#+\s*Works\s+Cited\s*$",
     r"^#+\s*Literature\s+Cited\s*$",
+    r"^References?\s*\(\s*\d+\s*\)$",   # "References (45)" plain text with count
 ]
 
 
@@ -79,10 +80,23 @@ def _is_numbered_ref_start(line: str) -> Optional[int]:
 def _is_author_year_start(line: str) -> bool:
     """Check if a line starts a new author-year reference (no numbering).
 
-    Patterns: Author, A. / Author A, / Author et al. / Authors and ...
+    Handles:
+    - D. Cantone, A. Ferro (initial. surname)
+    - Vaswani A, Shazeer N (surname initial)
+    - Moseley, J. (surname, initial.)
+    - Author et al.
+    Requires a 4-digit year (1900-2099) on the first line.
+    Rejects venue titles like "Storage and Analysis" or "Design and Implementation".
     """
     return bool(re.match(
-        r"^[A-Z][a-z]+(?:\s+(?:et\s+al|[A-Z]\b|and\b|de\b|van\b|von\b|le\b|la\b))",
+        r"^"
+        r"(?:"
+        r"[A-Z]\.\s+[A-Z][a-z]+"                       # D. Cantone
+        r"|[A-Z][a-z]+(?:,\s+|\.\s*)[A-Z]\."           # Moseley, J.
+        r"|[A-Z][a-z]+\s+[A-Z]\b"                      # Vaswani A
+        r"|[A-Z][a-z]+\s+et\s+al\b"                    # Author et al.
+        r")"
+        r".*?(?:\((19|20)\d{2}\)|[,\s](19|20)\d{2}\b)", # year: (2025) or , 2017 or 2019.
         line,
     ))
 
@@ -132,6 +146,7 @@ def extract_raw_references(ref_text: str) -> List[str]:
                 refs.append(" ".join(current))
                 current = []
                 is_new_ref = True
+                last_ref_num = num  # BUG FIX: update expected sequence
             elif num == last_ref_num + 1 or (not refs and num == 1):
                 is_new_ref = True
                 last_ref_num = num
@@ -142,8 +157,9 @@ def extract_raw_references(ref_text: str) -> List[str]:
                 is_new_ref = True
                 last_ref_num = num
 
-        # Author-year format: detect new reference start (works for both numbered and unnumbered)
-        if not is_new_ref and _is_author_year_start(stripped) and current:
+        # Author-year format: check when line has no number (handles mixed formats)
+        # Skip when has_numbering AND num is not None (numbered ref already handled above)
+        if not is_new_ref and (not has_numbering or num is None) and _is_author_year_start(stripped) and current:
             # Check that accumulated text looks complete
             joined = " ".join(current)
             if re.search(r"(?:19|20)\d{2}", joined) or joined.rstrip().endswith("."):
