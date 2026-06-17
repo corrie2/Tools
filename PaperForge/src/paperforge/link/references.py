@@ -26,8 +26,8 @@ def find_references_section(text: str) -> Optional[str]:
     """Locate the References/Bibliography section at the end of paper.md.
 
     Scans from the end of the text upwards for a heading matching known
-    reference section headers.  Returns the text after that heading, or
-    None if not found.
+    reference section headers.  Returns the text after that heading,
+    truncated at any non-reference heading (e.g. Appendix, Table).
     """
     lines = text.split("\n")
 
@@ -45,8 +45,15 @@ def find_references_section(text: str) -> Optional[str]:
     if header_idx is None:
         return None
 
-    # Return everything after the header
-    ref_lines = lines[header_idx + 1:]
+    # Collect lines after the header, stop at next heading
+    ref_lines = []
+    for line in lines[header_idx + 1:]:
+        stripped = line.strip()
+        # Stop if we hit another section heading (# or ##)
+        if re.match(r"^#{1,3}\s+\S", stripped):
+            break
+        ref_lines.append(line)
+
     ref_text = "\n".join(ref_lines).strip()
     return ref_text if ref_text else None
 
@@ -119,8 +126,9 @@ def extract_raw_references(ref_text: str) -> List[str]:
     for line in lines:
         stripped = line.strip()
         if not stripped:
-            # Blank line: soft separator — only flush if it looks like a boundary
-            if current:
+            # Blank line: only flush in unnumbered mode (author-year format).
+            # In numbered mode, [N] markers are the definitive boundaries.
+            if current and not has_numbering:
                 joined = " ".join(current)
                 # Flush if the accumulated text ends like a complete reference
                 if re.search(r"(?:19|20)\d{2}[a-z.)]?\s*$", joined) or \

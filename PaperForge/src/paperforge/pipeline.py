@@ -162,20 +162,21 @@ def ingest(
             from paperforge.link.semantic_scholar import enrich_metadata
             s2_result = enrich_metadata(doi=doi, title=title)
             if s2_result:
-                # Use S2 data to override/enrich local extraction
+                # Use S2 data to fill gaps, NOT to override local extraction.
+                # Local metadata from PDF parsing is generally more reliable.
                 s2_title = s2_result.get("title", "")
                 if s2_title:
                     # Only replace title if S2 title is significantly longer (>20%) AND original looks truncated
                     if len(s2_title) > len(title) * 1.2 and len(title) < 30:
                         title = s2_title
                 s2_authors = s2_result.get("authors", [])
-                if s2_authors:
+                if s2_authors and not authors:
                     authors = s2_authors
                 s2_year = s2_result.get("year")
-                if s2_year:
+                if s2_year and not year:
                     year = s2_year
                 s2_venue = s2_result.get("venue", "")
-                if s2_venue:
+                if s2_venue and not venue:
                     venue = s2_venue
                 s2_doi = s2_result.get("doi")
                 if s2_doi and not doi:
