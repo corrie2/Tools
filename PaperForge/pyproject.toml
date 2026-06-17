@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "PaperForge — PDF to structured knowledge base CLI tool"
 requires-python = ">=3.10"
 dependencies = [
-    "docling",
     "pymupdf",
     "pdfplumber",
     "click",
@@ -20,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+docling = ["docling"]
 dev = ["pytest", "pytest-cov"]
 
 [project.scripts]

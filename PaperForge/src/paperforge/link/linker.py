@@ -233,6 +233,10 @@ def _update_related_papers_index(vault: Path, paper_id: str, conn, direction: st
         join_col = "source_paper_id"
         where_col = "target_paper_id"
 
+    # Validate column names to prevent SQL injection
+    assert join_col in ("source_paper_id", "target_paper_id"), f"Invalid join_col: {join_col}"
+    assert where_col in ("source_paper_id", "target_paper_id"), f"Invalid where_col: {where_col}"
+
     updated = []
     rows = conn.execute(
         f"""SELECT p.* FROM citation_edges ce

@@ -171,8 +171,15 @@ def _validate_columns(data: dict, table: str) -> dict:
     return {k: v for k, v in data.items() if k in valid}
 
 
+_ALLOWED_TABLES = frozenset({
+    'papers', 'paper_tasks', 'references_raw', 'reference_candidates', 'citation_edges',
+})
+
+
 def _insert_record(conn: sqlite3.Connection, table: str, data: dict, or_ignore: bool = True, or_replace: bool = False) -> None:
     """Insert a record into any table with column validation."""
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f'Invalid table: {table}')
     data = _validate_columns(data, table)
     cols = ", ".join(data.keys())
     placeholders = ", ".join(["?"] * len(data))

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Known provider patterns: (provider_name, api_key_env, base_url_env, default_model, default_base_url)
 KNOWN_PROVIDERS = [
-    ("deepseek", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "deepseek-v3", "https://api.deepseek.com/v1"),
+    ("deepseek", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "deepseek-v4-pro", "https://api.deepseek.com/v1"),
     ("openai", "OPENAI_API_KEY", "OPENAI_BASE_URL", "gpt-4o", "https://api.openai.com/v1"),
     ("moonshot", "MOONSHOT_API_KEY", "MOONSHOT_BASE_URL", "moonshot-v1-128k", "https://api.moonshot.cn/v1"),
     ("zhipu", "ZHIPU_API_KEY", "ZHIPU_BASE_URL", "glm-4", "https://open.bigmodel.cn/api/paas/v4"),

@@ -10,15 +10,66 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+import logging
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from paperforge.config import load_config
 from paperforge.store import db
+
+from importlib.metadata import version as _pkg_version
+__version__ = _pkg_version('paperforge')
 
 try:
     from rapidfuzz import fuzz as _fuzz
 except ImportError:
     _fuzz = None
+
+
+def _run_llm_task_for_paper(paper_id, task_type, conn, vault, config,
+                            paper_text, llm_client, title, slug, year,
+                            translate="abstract"):
+    """Shared helper: run a single LLM task and update DB."""
+    from paperforge.pipeline import resolve_llm_task
+
+    task_id = db.insert_task(conn, paper_id, task_type)
+    db.update_task_status(conn, task_id, "running")
+    try:
+        gen_fn, write_fn = resolve_llm_task(task_type)
+        if task_type == "translate":
+            result = gen_fn(paper_text, llm_client, mode=translate,
+                            chunk_size=config.translation.chunk_size)
+            path = write_fn(vault, year, slug, result)
+        else:
+            result = gen_fn(paper_text, llm_client)
+            path = write_fn(vault, year, slug, title, result)
+        db.update_task_status(conn, task_id, "completed", output_path=str(path))
+        return True
+    except Exception as e:
+        db.update_task_status(conn, task_id, "failed", error=str(e))
+        raise
+
+
+def _find_and_validate_candidate(conn, source_id, target):
+    """Shared helper: find a pending candidate matching target via fuzzy title match.
+
+    Returns the matched candidate dict or None.
+    """
+    candidates = conn.execute(
+        """SELECT * FROM reference_candidates
+           WHERE source_paper_id = ? AND status = 'pending'""",
+        (source_id,),
+    ).fetchall()
+
+    for cand in candidates:
+        cand_dict = dict(cand)
+        if cand_dict.get("normalized_title") and target.get("normalized_title"):
+            score = _fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
+            if score >= 80:
+                return cand_dict
+
+    return None
 
 
 def _get_conn_and_paper(vault: Path, slug: str, exit_on_fail: bool = True):
@@ -42,7 +93,7 @@ def _get_conn_and_paper(vault: Path, slug: str, exit_on_fail: bool = True):
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="paperforge")
+@click.version_option(version=__version__, prog_name="paperforge")
 def cli():
     """PaperForge — PDF to structured knowledge base CLI tool."""
     pass
@@ -153,14 +204,13 @@ def doctor(vault: Path, fix: bool):
     # Also check if config has a provider set
     config_provider = "not set"
     if config_path.exists():
-        import yaml as _yaml
         try:
             with io.open(str(config_path)) as _f:
-                _data = _yaml.safe_load(_f) or {}
+                _data = yaml.safe_load(_f) or {}
             _llm = _data.get("llm", {})
             config_provider = f"{_llm.get('provider', '?')} / {_llm.get('model', '?')}"
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("doctor: failed to read config provider: %s", _e)
     checks.append(("Config LLM provider", config_provider != "not set", config_provider))
 
     # 11. Database statistics (if db exists)
@@ -184,10 +234,9 @@ def doctor(vault: Path, fix: bool):
                 "SELECT COUNT(*) as cnt FROM paper_tasks WHERE status = 'failed'"
             ).fetchone()
             failed_count = row["cnt"] if row else 0
-
             conn.close()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("doctor: failed to read database stats: %s", _e)
 
     checks.append(("Papers in database", paper_count > 0, str(paper_count)))
     if pending_count > 0:
@@ -360,7 +409,7 @@ def info(slug: str, vault: Path):
     click.echo(f"\nTask Statuses ({len(tasks)}):")
     click.echo(f"  {'Task Type':<15} {'Status':<12} {'Output Path'}")
     click.echo(f"  {'-' * 55}")
-    task_types = ["parse", "metadata", "summary", "qa", "glossary", "translate", "references", "link", "index"]
+    task_types = ["ingest", "summary", "qa", "glossary", "translate", "references"]
     task_map = {t["task_type"]: t for t in tasks}
     for tt in task_types:
         t = task_map.get(tt)
@@ -416,8 +465,6 @@ def info(slug: str, vault: Path):
               help="Translation mode (only for --type translate)")
 def regenerate(slug: str, vault: Path, task_type: str, translate: str):
     """Regenerate a specific LLM output for a paper."""
-    from paperforge.pipeline import resolve_llm_task
-
     config = load_config(vault)
     conn, paper = _get_conn_and_paper(vault, slug)
 
@@ -430,7 +477,7 @@ def regenerate(slug: str, vault: Path, task_type: str, translate: str):
         sys.exit(1)
 
     paper_text = paper_md.read_text(encoding="utf-8")
-    year = paper.get("year") or "unknown"
+    year = paper.get("year")
     title = paper.get("title", slug)
 
     from paperforge.llm.client import LLMClient
@@ -443,24 +490,13 @@ def regenerate(slug: str, vault: Path, task_type: str, translate: str):
 
     click.echo(f"Regenerating {task_type} for '{title}'...")
 
-    task_id = db.insert_task(conn, paper["id"], task_type)
-    db.update_task_status(conn, task_id, "running")
-
     try:
-        gen_fn, write_fn = resolve_llm_task(task_type)
-        if task_type == "translate":
-            result = gen_fn(paper_text, llm_client, mode=translate,
-                            chunk_size=config.translation.chunk_size)
-            path = write_fn(vault, year, slug, result)
-        else:
-            result = gen_fn(paper_text, llm_client)
-            path = write_fn(vault, year, slug, title, result)
-
-        db.update_task_status(conn, task_id, "completed", output_path=str(path))
-        click.echo(click.style(f"  OK: {task_type} written to {path}", fg="green"))
-    except Exception as e:
-        db.update_task_status(conn, task_id, "failed", error=str(e))
-        click.echo(click.style(f"  FAIL: {e}", fg="red"))
+        _run_llm_task_for_paper(paper["id"], task_type, conn, vault, config,
+                                paper_text, llm_client, title, slug, year,
+                                translate=translate)
+        click.echo(click.style(f"  OK: {task_type} written", fg="green"))
+    except Exception:
+        click.echo(click.style(f"  FAIL", fg="red"))
         conn.close()
         sys.exit(1)
 
@@ -508,8 +544,6 @@ def status(slug: str, vault: Path):
               help="Translation mode for retry")
 def retry(slug: str, vault: Path, translate: str):
     """Retry all failed LLM tasks for a paper."""
-    from paperforge.pipeline import resolve_llm_task
-
     config = load_config(vault)
     conn, paper = _get_conn_and_paper(vault, slug)
 
@@ -532,7 +566,7 @@ def retry(slug: str, vault: Path, translate: str):
         sys.exit(1)
 
     paper_text = paper_md.read_text(encoding="utf-8")
-    year = paper.get("year") or "unknown"
+    year = paper.get("year")
     title = paper.get("title", slug)
 
     from paperforge.llm.client import LLMClient
@@ -548,24 +582,13 @@ def retry(slug: str, vault: Path, translate: str):
         task_type = task["task_type"]
         click.echo(f"  Retrying {task_type}...")
 
-        new_task_id = db.insert_task(conn, paper["id"], task_type)
-        db.update_task_status(conn, new_task_id, "running")
-
         try:
-            gen_fn, write_fn = resolve_llm_task(task_type)
-            if task_type == "translate":
-                result = gen_fn(paper_text, llm_client, mode=translate,
-                                chunk_size=config.translation.chunk_size)
-                path = write_fn(vault, year, slug, result)
-            else:
-                result = gen_fn(paper_text, llm_client)
-                path = write_fn(vault, year, slug, title, result)
-
-            db.update_task_status(conn, new_task_id, "completed", output_path=str(path))
+            _run_llm_task_for_paper(paper["id"], task_type, conn, vault, config,
+                                    paper_text, llm_client, title, slug, year,
+                                    translate=translate)
             click.echo(click.style(f"    OK: {task_type}", fg="green"))
             retried += 1
         except Exception as e:
-            db.update_task_status(conn, new_task_id, "failed", error=str(e))
             click.echo(click.style(f"    FAIL: {e}", fg="red"))
 
     # Update paper status
@@ -601,7 +624,7 @@ def relink(vault: Path):
 
     from paperforge.link.references import find_references_section, extract_raw_references
     from paperforge.link.linker import (
-        generate_citation_section, update_index_md,
+        generate_citation_section,
         update_cited_papers_index, update_citing_papers_index,
         process_single_reference,
     )
@@ -611,7 +634,7 @@ def relink(vault: Path):
     for paper in papers:
         paper_id = paper["id"]
         slug = paper["slug"]
-        year = paper.get("year") or "unknown"
+        year = paper.get("year")
 
         # Read paper.md
         paper_dir = vault / (paper.get("paper_dir") or "")
@@ -701,36 +724,27 @@ def confirm_ref(source_slug: str, target_slug: str, vault: Path):
         sys.exit(1)
 
     # Find pending candidates that match
-    candidates = conn.execute(
-        """SELECT * FROM reference_candidates
-           WHERE source_paper_id = ? AND status = 'pending'""",
-        (source["id"],),
-    ).fetchall()
+    if _fuzz is None:
+        click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
+        conn.close()
+        sys.exit(1)
 
-    # Try to find a candidate whose title matches target
+    matched_cand = _find_and_validate_candidate(conn, source["id"], target)
+
     confirmed = False
-    for cand in candidates:
-        cand_dict = dict(cand)
-        if cand_dict.get("normalized_title") and target.get("normalized_title"):
-            if _fuzz is None:
-                click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
-                conn.close()
-                sys.exit(1)
-            score = _fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
-            if score >= 80:
-                db.update_candidate_status(conn, cand_dict["id"], "confirmed")
-                db.insert_citation_edge(
-                    conn, source["id"], target["id"],
-                    match_method="manual", confidence=1.0,
-                )
-                conn.execute(
-                    "UPDATE reference_candidates SET matched_paper_id = ? WHERE id = ?",
-                    (target["id"], cand_dict["id"]),
-                )
-                conn.commit()
-                confirmed = True
-                click.echo(click.style(f"  Confirmed: {source_slug} -> {target_slug}", fg="green"))
-                break
+    if matched_cand:
+        db.update_candidate_status(conn, matched_cand["id"], "confirmed")
+        db.insert_citation_edge(
+            conn, source["id"], target["id"],
+            match_method="manual", confidence=1.0,
+        )
+        conn.execute(
+            "UPDATE reference_candidates SET matched_paper_id = ? WHERE id = ?",
+            (target["id"], matched_cand["id"]),
+        )
+        conn.commit()
+        confirmed = True
+        click.echo(click.style(f"  Confirmed: {source_slug} -> {target_slug}", fg="green"))
 
     if not confirmed:
         db.insert_citation_edge(
@@ -765,26 +779,18 @@ def reject_ref(source_slug: str, target_slug: str, vault: Path):
         sys.exit(1)
 
     # Find and reject pending candidates
-    candidates = conn.execute(
-        """SELECT * FROM reference_candidates
-           WHERE source_paper_id = ? AND status = 'pending'""",
-        (source["id"],),
-    ).fetchall()
+    if _fuzz is None:
+        click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
+        conn.close()
+        sys.exit(1)
+
+    matched_cand = _find_and_validate_candidate(conn, source["id"], target)
 
     rejected = False
-    for cand in candidates:
-        cand_dict = dict(cand)
-        if cand_dict.get("normalized_title") and target.get("normalized_title"):
-            if _fuzz is None:
-                click.echo(click.style("  rapidfuzz not installed. Run: pip install rapidfuzz", fg="red"))
-                conn.close()
-                sys.exit(1)
-            score = _fuzz.ratio(cand_dict["normalized_title"], target["normalized_title"])
-            if score >= 80:
-                db.update_candidate_status(conn, cand_dict["id"], "rejected")
-                rejected = True
-                click.echo(click.style(f"  Rejected: {source_slug} !-> {target_slug}", fg="yellow"))
-                break
+    if matched_cand:
+        db.update_candidate_status(conn, matched_cand["id"], "rejected")
+        rejected = True
+        click.echo(click.style(f"  Rejected: {source_slug} !-> {target_slug}", fg="yellow"))
 
     if not rejected:
         click.echo("  No matching pending reference found to reject.")
@@ -867,6 +873,10 @@ def remove(slug: str, vault: Path, yes: bool):
 
     # 2. Delete paper directory
     if paper_dir.exists():
+        if not paper_dir.resolve().is_relative_to(vault.resolve()):
+            click.echo(click.style("  Refusing to delete directory outside vault.", fg="red"))
+            conn.close()
+            return
         shutil.rmtree(paper_dir)
         click.echo(f"  Deleted directory: {paper_dir}")
     else:
@@ -919,7 +929,7 @@ def rebuild_index(vault: Path):
     updated = 0
     for paper in papers:
         try:
-            year = paper.get("year") or "unknown"
+            year = paper.get("year")
             slug = paper["slug"]
             paper_id = paper["id"]
 
@@ -938,10 +948,10 @@ def rebuild_index(vault: Path):
     click.echo(click.style(f"\n  Rebuilt {updated}/{len(papers)} index files.", fg="green"))
 
 
-@cli.command()
+@cli.command("open")
 @click.argument("slug")
 @click.option("--vault", required=True, type=click.Path(path_type=Path), help="Obsidian vault path")
-def open(slug: str, vault: Path):
+def open_paper(slug: str, vault: Path):
     """Open a paper's index.md in the system default application."""
     conn, paper = _get_conn_and_paper(vault, slug)
     conn.close()

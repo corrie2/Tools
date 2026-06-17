@@ -22,7 +22,7 @@ def _api_get(url: str, timeout: int = 30) -> Optional[dict]:
     try:
         req = urllib.request.Request(url, headers={
             "Accept": "application/json",
-            "User-Agent": "PaperForge/0.1 (mailto:paperforge@example.com)",
+            "User-Agent": "PaperForge/0.1 (https://github.com/corrie2/Tools)",
         })
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))

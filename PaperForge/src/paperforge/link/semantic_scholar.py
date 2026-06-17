@@ -132,7 +132,7 @@ def get_paper_by_doi(doi: str) -> Optional[dict]:
     return _normalize_result(data)
 
 
-def get_references(paper_id: str) -> List[dict]:
+def get_references(paper_id: str) -> List[dict]:  # reserved for future use
     """Get references of a paper from Semantic Scholar.
 
     Args:

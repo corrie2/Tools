@@ -60,7 +60,7 @@ class IngestResult:
 def ingest(
     pdf_path: Path,
     vault: Path,
-    no_llm: bool = True,
+    no_llm: bool = False,
     translate: str = "off",
     config: Optional[Config] = None,
 ) -> IngestResult:
@@ -483,6 +483,12 @@ def _run_reference_linking(
             except Exception as e:
                 logger.warning("Failed to update related papers' index.md: %s", e)
 
+        # 7. Render pending_review.md for all pending candidates
+        try:
+            _render_pending_review(vault, conn)
+        except Exception as e:
+            logger.warning("Failed to render pending_review.md: %s", e)
+
         logger.info(
             "Reference linking: %d confirmed, %d pending, %d unmatched (out of %d)",
             stats["confirmed"], stats["pending"], stats["unmatched"], len(structured_refs),
@@ -496,3 +502,35 @@ def _run_reference_linking(
     except Exception as e:
         logger.error("Reference linking failed: %s", e)
         db.update_task_status(conn, task_id, "failed", error=str(e))
+
+
+def _render_pending_review(vault: Path, conn) -> None:
+    """Render pending_review.md with all low-confidence candidates."""
+    from paperforge.store.writer import write_pending_review_md
+
+    rows = conn.execute(
+        """SELECT rc.id, rc.title, rc.confidence, rc.raw_reference_id,
+                  rr.raw_text, rr.parsed_title, rr.parsed_year,
+                  p.slug AS source_slug, p.title AS source_title,
+                  mp.slug AS matched_slug
+           FROM reference_candidates rc
+           LEFT JOIN references_raw rr ON rr.id = rc.raw_reference_id
+           LEFT JOIN papers p ON p.id = rc.source_paper_id
+           LEFT JOIN papers mp ON mp.id = rc.matched_paper_id
+           WHERE rc.status = 'pending'
+           ORDER BY rc.confidence DESC""",
+    ).fetchall()
+
+    pending = []
+    for r in rows:
+        pending.append({
+            "source_title": r["source_title"] or "Unknown",
+            "source_slug": r["source_slug"] or "",
+            "raw_text": r["raw_text"] or "",
+            "parsed_title": r["parsed_title"] or r["title"] or "",
+            "parsed_year": r["parsed_year"],
+            "candidate_slug": r["matched_slug"] or "",
+            "confidence": round(r["confidence"], 2) if r["confidence"] else 0,
+        })
+
+    write_pending_review_md(vault, pending)

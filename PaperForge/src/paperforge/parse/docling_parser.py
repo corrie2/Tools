@@ -111,11 +111,11 @@ def parse_with_docling(
                                     image.to_pil().save(str(fig_path))
                                 figures[fig_name] = fig_path
                         except Exception as e:
-                            parse_warnings.append(f"figure {i}: {e}")
-                            logger.debug(f"Failed to extract picture {i}: {e}")
+                            parse_warnings.append("figure %d: %s" % (i, e))
+                            logger.debug("Failed to extract picture %d: %s", i, e)
             except Exception as e:
-                parse_warnings.append(f"figure extraction: {e}")
-                logger.warning(f"Failed to extract figures: {e}")
+                parse_warnings.append("figure extraction: %s" % e)
+                logger.warning("Failed to extract figures: %s", e)
 
         # Extract tables
         tables: List[str] = []
@@ -146,5 +146,5 @@ def parse_with_docling(
         )
 
     except Exception as e:
-        logger.warning(f"Docling parsing failed: {e}")
+        logger.warning("Docling parsing failed: %s", e)
         return None

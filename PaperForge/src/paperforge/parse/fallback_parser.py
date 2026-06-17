@@ -64,7 +64,7 @@ def parse_with_fallback(
                             fig_path.write_bytes(base_image["image"])
                             figures[fig_name] = fig_path
                     except Exception as e:
-                        logger.warning(f"Failed to extract image xref={xref}: {e}")
+                        logger.warning("Failed to extract image xref=%s: %s", xref, e)
 
         # Extract tables using pdfplumber
         tables: List[str] = []
@@ -83,7 +83,7 @@ def parse_with_fallback(
             except ImportError:
                 logger.warning("pdfplumber not installed, skipping table extraction")
             except Exception as e:
-                logger.warning(f"pdfplumber table extraction failed: {e}")
+                logger.warning("pdfplumber table extraction failed: %s", e)
 
         doc.close()
 
@@ -96,7 +96,7 @@ def parse_with_fallback(
         )
 
     except Exception as e:
-        logger.warning(f"Fallback parsing failed: {e}")
+        logger.warning("Fallback parsing failed: %s", e)
         return None
 
 

@@ -7,6 +7,10 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 try:
     import fitz  # PyMuPDF
 except ImportError:
@@ -52,7 +56,8 @@ def detect_language(text: str) -> str:
         elif lang.startswith("en"):
             return "en"
         return lang
-    except Exception:
+    except Exception as e:
+        logger.debug("metadata extraction failed for language detection: %s", e)
         return "unknown"
 
 
@@ -116,7 +121,8 @@ def extract_title_from_pdf(pdf_path: Path) -> Optional[str]:
         # Clean up
         title = re.sub(r"\s+", " ", title).strip()
         return title if len(title) > 3 else None
-    except Exception:
+    except Exception as e:
+        logger.debug("metadata extraction failed for title: %s", e)
         return None
 
 
@@ -178,7 +184,8 @@ def extract_authors_from_pdf(pdf_path: Path) -> list:
                         authors.append(name)
             return authors
         return []
-    except Exception:
+    except Exception as e:
+        logger.debug("metadata extraction failed for authors: %s", e)
         return []
 
 
@@ -227,8 +234,8 @@ def extract_metadata(pdf_path: Path, sha256: Optional[str] = None) -> dict:
                         if 1960 <= candidate <= 2099:
                             year = candidate
                             break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("metadata extraction failed for DOI/language/year: %s", e)
 
     return {
         "title": title or "",

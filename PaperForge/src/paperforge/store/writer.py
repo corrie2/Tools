@@ -288,3 +288,24 @@ def write_papers_index(vault: Path, papers: List[dict]) -> Path:
     index_path = papers_dir / "index.md"
     index_path.write_text(content, encoding="utf-8")
     return index_path
+
+
+def write_pending_review_md(vault: Path, pending: List[dict]) -> Path:
+    """Generate and write papers/pending_review.md for low-confidence references.
+
+    Args:
+        vault: Vault root path.
+        pending: List of dicts with keys: source_title, source_slug, raw_text,
+                 parsed_title, parsed_year, candidate_slug, confidence.
+
+    Returns:
+        Path to pending_review.md.
+    """
+    template = _env.get_template("pending_review.md.j2")
+    content = template.render(pending=pending, vault=str(vault))
+
+    papers_dir = vault / "papers"
+    papers_dir.mkdir(parents=True, exist_ok=True)
+    path = papers_dir / "pending_review.md"
+    path.write_text(content, encoding="utf-8")
+    return path
